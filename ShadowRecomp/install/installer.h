@@ -26,4 +26,7 @@ namespace Installer
     bool ParseSources(const std::filesystem::path& sourcePath, Sources& sources, std::string& errorMessage);
     bool Install(const std::filesystem::path& sourcePath, const std::filesystem::path& outputDir, const ProgressCallback& callback, std::string& errorMessage);
     bool CheckInstall(const std::filesystem::path& gameDir, const ProgressCallback& callback, std::string& errorMessage);
+#ifdef SHADOW_RECOMP_UWP
+    bool CheckExtractedGame(const std::filesystem::path& gameDir, std::string& errorMessage);
+#endif
 }

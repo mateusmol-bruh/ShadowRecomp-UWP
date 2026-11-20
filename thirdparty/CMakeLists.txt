@@ -1,9 +1,12 @@
-﻿cmake_policy(SET CMP0077 NEW)
+cmake_policy(SET CMP0077 NEW)
 
 set(MSDF_ATLAS_BUILD_STANDALONE OFF)
 set(MSDF_ATLAS_USE_SKIA OFF)
 set(MSDF_ATLAS_NO_ARTERY_FONT ON)
 set(MSDFGEN_DISABLE_PNG ON)
+if(SHADOW_RECOMP_UWP)
+    set(MSDF_ATLAS_DYNAMIC_RUNTIME ON)
+endif()
 
 set(SDL_TEST_LIBRARY OFF)
 
@@ -23,15 +26,19 @@ if (CMAKE_SYSTEM_NAME MATCHES "Linux")
     set(PLUME_SDL3_VULKAN_ENABLED ON CACHE BOOL "")
 endif()
 
-if (WIN32)
+if (WIN32 AND NOT SHADOW_RECOMP_UWP)
     set(PLUME_D3D12_AGILITY_SDK_ENABLED ON CACHE BOOL "")
 endif()
 
 
 add_subdirectory("${SHADOW_RECOMP_THIRDPARTY_ROOT}/msdf-atlas-gen")
 
-add_subdirectory("${SHADOW_RECOMP_THIRDPARTY_ROOT}/discord-rpc")
 add_subdirectory("${SHADOW_RECOMP_THIRDPARTY_ROOT}/o1heap")
-add_subdirectory("${SHADOW_RECOMP_THIRDPARTY_ROOT}/SDL")
+if(SHADOW_RECOMP_UWP)
+    include("${CMAKE_SOURCE_DIR}/toolchains/uwp/plume.cmake")
+else()
+    add_subdirectory("${SHADOW_RECOMP_THIRDPARTY_ROOT}/SDL")
+    add_subdirectory("${SHADOW_RECOMP_THIRDPARTY_ROOT}/plume")
+    add_subdirectory("${SHADOW_RECOMP_THIRDPARTY_ROOT}/discord-rpc")
+endif()
 add_subdirectory("${SHADOW_RECOMP_THIRDPARTY_ROOT}/SDL_mixer")
-add_subdirectory("${SHADOW_RECOMP_THIRDPARTY_ROOT}/plume")

@@ -31,10 +31,18 @@
 #include <gpu/frame_pacing/timer_resolution.h>
 #include <patches/pause_patches.h>
 #include <patches/bloom_patches.h>
+#ifndef SHADOW_RECOMP_UWP
 #include <misc/rich_presence/shadow_rpc.h>
+#endif
+#ifdef SHADOW_RECOMP_UWP
+#include <os/uwp/platform.h>
+#include <os/uwp/xbe_kernel_data.h>
+
+uint32_t decode_kernel_thunk_addr(uint32_t encodedAddress, uint32_t imageSize);
+#endif
 
 
-#if defined(_WIN32) && defined(SHADOW_RECOMP_D3D12)
+#if defined(_WIN32) && defined(SHADOW_RECOMP_D3D12) && !defined(SHADOW_RECOMP_UWP)
 static std::array<std::string_view, 3> g_D3D12RequiredModules =
 {
     "D3D12/D3D12Core.dll",
@@ -45,6 +53,38 @@ static std::array<std::string_view, 3> g_D3D12RequiredModules =
 
 Memory g_memory;
 Heap g_userHeap;
+
+#ifdef SHADOW_RECOMP_UWP
+static bool InitializeXbeKernelData(const XbeHeader& header, std::span<const XbeSectionHeader> sections)
+{
+    const uint32_t table = decode_kernel_thunk_addr(header.m_kernel_image_thunk_addr, header.sizeOfImage);
+    if (table < header.baseAddress || table % sizeof(uint32_t) != 0)
+        return false;
+
+    for (const auto& section : sections)
+    {
+        const uint64_t end = uint64_t(section.virtualAddress) + std::min(section.virtualSize, section.rawSize);
+        if (table < section.virtualAddress || uint64_t(table) + sizeof(uint32_t) > end)
+            continue;
+
+        auto* entries = static_cast<uint32_t*>(g_memory.Translate(table));
+        const std::span words(entries, (end - table) / sizeof(uint32_t));
+        const auto terminator = std::ranges::find(words, 0u);
+        if (terminator == words.end())
+            return false;
+
+        auto* data = static_cast<Uwp::XbeKernelData*>(g_userHeap.Alloc(sizeof(Uwp::XbeKernelData)));
+        if (!data)
+            return false;
+        std::construct_at(data);
+        const size_t count = Uwp::BindXbeKernelData(
+            words.first(static_cast<size_t>(terminator - words.begin())), g_memory.MapVirtual(data), *data);
+        Uwp::LogStartup(fmt::format("Kernel: bound {} XBE data imports.", count));
+        return true;
+    }
+    return false;
+}
+#endif
 
 // return a modifiable pointer inside this structure that corresponds to a virtual address
 uint8_t* GetAddr(uint32_t xbeVA, const XbeHeader& header, const XbeSectionHeader* sectionHeaders)
@@ -97,6 +137,11 @@ uint32_t LoadXbeModule(const std::filesystem::path& path)
         memcpy(destData, srcData, sectionHeaders[i].rawSize);
     }
 
+#ifdef SHADOW_RECOMP_UWP
+    if (!InitializeXbeKernelData(*header, { sectionHeaders, header->numSections }))
+        throw std::runtime_error("Could not bind kernel data imports from the selected XBE.");
+#endif
+
     void* addr = GetAddr(header->tlsAddress, *header, sectionHeaders);
     if (addr)
     {
@@ -113,8 +158,14 @@ void HostStartup()
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 #endif
 
+#ifndef SHADOW_RECOMP_UWP
     input::Init();
+#endif
 
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::LogStartup("Memory: initializing guest address space and heaps.");
+    g_memory.InitForGame();
+#endif
     if (g_memory.base == nullptr)
     {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("System_MemoryAllocationFailed").c_str(), GameWindow::s_pWindow);
@@ -123,9 +174,12 @@ void HostStartup()
 
 
     g_userHeap.Init();
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::LogStartup(fmt::format("Memory: guest heaps ready at host base {}.", fmt::ptr(g_memory.base)));
+#endif
 }
 
-extern bool isHostThread;
+extern thread_local bool isHostThread;
 
 
 bool QuickBootConfig = false;
@@ -158,9 +212,16 @@ static void ParseEventList(const char* arg)
     }
 }
 
+#ifdef SHADOW_RECOMP_UWP
+int ShadowRecompMain(int argc, char* argv[])
+#else
 int main(int argc, char* argv[])
+#endif
 {
-#ifdef _WIN32
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::InitializeStorage();
+    QuickBootConfig = Uwp::ConsumeQuickBoot();
+#elif defined(_WIN32)
     //SetProcessAffinityMask(GetCurrentProcess(), 1);
     TimerResolution::SetHighestResolution();
 
@@ -187,7 +248,7 @@ int main(int argc, char* argv[])
     LOGN("Starting Shadow Recomp");
 
     std::filesystem::path xbePath;
-    xbePath = GameExecutable;
+    xbePath = GetGameExecutablePath();
 
     bool forceInstaller = false;
     bool useDefaultWorkingDirectory = false;
@@ -251,6 +312,7 @@ int main(int argc, char* argv[])
         Ts_EventIDs.clear();
     }
 
+#ifndef SHADOW_RECOMP_UWP
     if (!useDefaultWorkingDirectory)
     {
         // Set the current working directory to the executable's path.
@@ -258,9 +320,39 @@ int main(int argc, char* argv[])
         std::filesystem::current_path(os::process::GetExecutableRoot(), ec);
     }
 
+#else
+    const auto installRequest = Uwp::GetLocalStatePath() / "install.txt";
+    forceInstaller = forceInstaller || std::filesystem::is_regular_file(installRequest);
+#endif
+
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::LogStartup("Loading configuration.");
+#endif
     Config::Load();
 
-    bool isGameInstalled = std::filesystem::exists(GameExecutable);
+#ifdef SHADOW_RECOMP_UWP
+    if (!forceInstaller && !std::filesystem::is_regular_file(GetGameExecutablePath()))
+    {
+        Uwp::LogStartup("Media: looking for an extracted disc to launch directly.");
+        std::string status;
+        const auto sources = Uwp::GetInstallSources(true, status);
+        for (const auto& executable : sources)
+        {
+            const auto root = executable.parent_path();
+            if (Installer::CheckExtractedGame(root, status))
+            {
+                Uwp::SetExtractedGamePath(root);
+                Uwp::LogStartup("Media: verified extracted disc. Launching in place.");
+                break;
+            }
+            Uwp::LogStartup("Media: extracted disc rejected. " + status);
+        }
+        if (sources.empty())
+            Uwp::LogStartup("Media: " + status);
+    }
+#endif
+
+    bool isGameInstalled = std::filesystem::exists(GetGameExecutablePath());
     bool runInstallerWizard = forceInstaller || !isGameInstalled;
 
     if (forceInstallationCheck)
@@ -268,7 +360,7 @@ int main(int argc, char* argv[])
         os::process::ShowConsole();
         int lastDecile = -1;
         std::string errorMessage;
-        bool isInstallValid = Installer::CheckInstall(MainGameFolder, [&](const Installer::Progress& progress)
+        bool isInstallValid = Installer::CheckInstall(GetMainGameFolder(), [&](const Installer::Progress& progress)
         {
             int decile = int(progress.ratio * 10.0f);
             if (decile != lastDecile)
@@ -287,21 +379,36 @@ int main(int argc, char* argv[])
 
     if (runInstallerWizard)
     {
+#ifdef SHADOW_RECOMP_UWP
+        Uwp::LogStartup("Installed game unavailable or setup explicitly requested.");
+#endif
         if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
         {
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("Video_BackendError").c_str(), GameWindow::s_pWindow);
             std::_Exit(1);
         }
 
+#ifndef SHADOW_RECOMP_UWP
         g_userHeap.Init();
+#else
+        Uwp::LogStartup("Installer: opening setup wizard.");
+#endif
 
         if (!InstallerWizard::Run(GetGamePath()))
         {
+#ifdef SHADOW_RECOMP_UWP
+            Uwp::LogStartup("Installer: wizard closed before installation completed.");
+#endif
             std::_Exit(0);
         }
+#ifdef SHADOW_RECOMP_UWP
+        Uwp::LogStartup("Installer: installation completed.");
+        std::error_code ec;
+        std::filesystem::remove(installRequest, ec);
+#endif
     }
 
-#if defined(_WIN32) && defined(SHADOW_RECOMP_D3D12)
+#if defined(_WIN32) && defined(SHADOW_RECOMP_D3D12) && !defined(SHADOW_RECOMP_UWP)
     for (auto& dll : g_D3D12RequiredModules)
     {
         if (!std::filesystem::exists(g_executableRoot / dll))
@@ -327,23 +434,40 @@ int main(int argc, char* argv[])
     if (Config::ShowConsole)
         os::process::ShowConsole();
 
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::LogStartup("Starting host subsystems.");
+#endif
     HostStartup();
 
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::LogStartup("Loading mods.");
+#endif
     ModLoader::Init();
 
     //init mutexes for multi-core patch
     InitMultiCoreMutexesPatches();
 
 
-    isGameInstalled = std::filesystem::exists(GameExecutable);
+    isGameInstalled = std::filesystem::exists(GetGameExecutablePath());
     if (!isGameInstalled)
     {
+#ifdef SHADOW_RECOMP_UWP
+        Uwp::LogStartup("The selected game/default.xbe is missing.");
+#endif
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), "Game files not found. Please reinstall.", GameWindow::s_pWindow);
         std::_Exit(1);
     }
 
-    xbePath = GameExecutable;
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::LogStartup("Loading default.xbe from the selected game folder.");
+#endif
+    xbePath = GetGameExecutablePath();
     uint32_t entry = LoadXbeModule(xbePath);
+#ifdef SHADOW_RECOMP_UWP
+    if (entry < X86_CODE_BASE || entry - X86_CODE_BASE >= X86_CODE_SIZE || !g_memory.FindFunction(entry))
+        throw std::runtime_error("The XBE entry point does not match this recompilation. Use supported original media.");
+    Uwp::LogStartup("Game executable loaded.");
+#endif
 
     if (!runInstallerWizard)
     {
@@ -354,8 +478,14 @@ int main(int argc, char* argv[])
         }
     }
 
+#ifdef SHADOW_RECOMP_UWP
+    input::Init();
+#endif
 
 
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::LogStartup("Preparing shader and pipeline caches.");
+#endif
     Video::PrecompileShadersAndPipelines();
 
     PatchUnixStrings();
@@ -364,10 +494,15 @@ int main(int argc, char* argv[])
     MultiplayerPatchesInit();
     PausePatchesInit();
     BloomConfigValueChangedCallback(&Config::BloomIntensity);
+#ifndef SHADOW_RECOMP_UWP
     RichPresence::ShadowRpc::Start();
+#endif
 
     //launch the Start function of the game
     isHostThread = true;
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::LogStartup("Starting recompiled game thread.");
+#endif
     GuestThreadParams params = { entry, 0, 0, 0, 0 };
     GuestThread::Start(params);
 

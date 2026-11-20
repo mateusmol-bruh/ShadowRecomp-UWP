@@ -1,4 +1,7 @@
 #include "game_window.h"
+#ifdef SHADOW_RECOMP_UWP
+#include <os/uwp/platform.h>
+#endif
 #include <gpu/video.h>
 
 #include <app.h>
@@ -6,7 +9,7 @@
 
 #include <cmath>
 
-#if _WIN32
+#if defined(_WIN32) && !defined(SHADOW_RECOMP_UWP)
 #include <dwmapi.h>
 #include <shellscalingapi.h>
 #endif
@@ -234,7 +237,9 @@ void GameWindow::Init(const char* sdlVideoDriver)
     SDL_AddEventWatch(Window_OnSDLEvent, s_pWindow);
 
 #ifdef _WIN32
+#ifndef SHADOW_RECOMP_UWP
     SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+#endif
 #endif
 
     s_x = Config::WindowX;
@@ -257,6 +262,8 @@ void GameWindow::Init(const char* sdlVideoDriver)
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, GetWindowFlags());
     s_pWindow = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
+    if (!s_pWindow)
+        return;
 
     if (IsFullscreen())
         SDL_HideCursor();
@@ -269,7 +276,11 @@ void GameWindow::Init(const char* sdlVideoDriver)
 
     auto windowProps = SDL_GetWindowProperties(s_pWindow);
 
-#if defined(_WIN32)
+#if defined(SHADOW_RECOMP_UWP)
+    s_renderWindow = reinterpret_cast<HWND>(
+        SDL_GetPointerProperty(windowProps, SDL_PROP_WINDOW_WINRT_WINDOW_POINTER, nullptr));
+    Uwp::UpdateRenderSize(s_pWindow);
+#elif defined(_WIN32)
     s_renderWindow = (HWND)SDL_GetPointerProperty(windowProps, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
 
     /**if (Config::DisableDWMRoundedCorners)
@@ -293,6 +304,9 @@ void GameWindow::Init(const char* sdlVideoDriver)
 
 void GameWindow::Update()
 {
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::UpdateRenderSize(s_pWindow);
+#endif
     if (!GameWindow::IsFullscreen() && !GameWindow::IsMaximised() && !s_isChangingDisplay)
     {
         Config::WindowX = GameWindow::s_x;

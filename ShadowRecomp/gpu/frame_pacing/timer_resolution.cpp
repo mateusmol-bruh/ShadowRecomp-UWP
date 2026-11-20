@@ -1,6 +1,6 @@
 #include "timer_resolution.h"
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(SHADOW_RECOMP_UWP)
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -27,7 +27,7 @@ bool TimerResolution::SetHighestResolution()
     if (s_isActive)
         return true;
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(SHADOW_RECOMP_UWP)
     const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if (ntdll == nullptr)
         return false;
@@ -74,7 +74,7 @@ double TimerResolution::GetGranularityMs()
 
 void TimerResolution::Release()
 {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(SHADOW_RECOMP_UWP)
     if (!s_isActive)
         return;
 

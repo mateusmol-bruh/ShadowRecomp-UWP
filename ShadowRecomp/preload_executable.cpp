@@ -6,7 +6,7 @@
 
 PreloadContext::~PreloadContext()
 {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(SHADOW_RECOMP_UWP)
     if (preloaded)
     {
         VirtualUnlock(view, size);
@@ -18,7 +18,7 @@ PreloadContext::~PreloadContext()
 
 void PreloadContext::PreloadExecutable()
 {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(SHADOW_RECOMP_UWP)
     wchar_t moduleName[MAX_PATH];
     GetModuleFileNameW(NULL, moduleName, MAX_PATH);
 

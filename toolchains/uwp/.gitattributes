@@ -1,0 +1,3 @@
+plume-corewindow.patch whitespace=-blank-at-eol eol=lf
+sdl-wasapi.patch whitespace=-blank-at-eol eol=lf
+sdl-virtual-joystick.patch whitespace=-blank-at-eol eol=lf

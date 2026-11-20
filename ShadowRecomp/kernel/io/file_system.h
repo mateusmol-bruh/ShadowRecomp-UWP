@@ -3,9 +3,15 @@
 #include "user/paths.h"
 
 static const std::string GameExecutableFile = "default.xbe";
-inline std::string GetMainGameFolder() { return (GetGamePath() / "game").string(); }
-const std::string MainGameFolder = GetMainGameFolder();
-static const std::string GameExecutable = MainGameFolder + "/" + GameExecutableFile;
+#ifdef SHADOW_RECOMP_UWP
+std::filesystem::path GetMainGameFolder();
+#else
+inline std::filesystem::path GetMainGameFolder() { return GetGamePath() / "game"; }
+#endif
+inline std::filesystem::path GetGameExecutablePath()
+{
+    return GetMainGameFolder() / GameExecutableFile;
+}
 
 struct FileSystem
 {

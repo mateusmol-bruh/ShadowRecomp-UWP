@@ -1,6 +1,10 @@
 ﻿#include "installer_wizard.h"
 
+#ifdef SHADOW_RECOMP_UWP
+#include <os/uwp/platform.h>
+#else
 #include <nfd.h>
+#endif
 #include <audio/embedded_player.h>
 #include <install/installer.h>
 #include <gpu/video.h>
@@ -374,9 +378,15 @@ static void InstallerThread()
 
 	std::filesystem::path sourcePath(std::u8string_view(reinterpret_cast<const char8_t*>(g_sourcePath.c_str())));
 	std::string errorMessage;
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::LogStartup("Installer: validating and copying game files.");
+#endif
 	bool success = Installer::Install(sourcePath, g_installPath, progressCallback, errorMessage);
 	if (success)
 	{
+#ifdef SHADOW_RECOMP_UWP
+        Uwp::LogStartup("Installer: files installed. Preparing shader and pipeline caches.");
+#endif
 		g_installerCompiling.store(true);
 
 		Video::PrecompileShadersAndPipelinesForInstall([](float progress)
@@ -389,6 +399,9 @@ static void InstallerThread()
 	}
 	else
 	{
+#ifdef SHADOW_RECOMP_UWP
+        Uwp::LogStartup("Installer: " + errorMessage);
+#endif
 		LOGF_ERROR("Installing from {} failed: {}", g_sourcePath, errorMessage);
 
 		g_installerProgressTarget.store(1.0f);
@@ -1329,10 +1342,21 @@ bool InstallerWizard::Run(std::filesystem::path installPath)
 	g_currentCursorBack = false;
 	g_joypadAxis = {};
 
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::LogStartup("Installer: finding original media.");
+    g_sourcePath = Uwp::NextInstallSource({}, g_statusMessage);
+    Uwp::LogStartup(g_sourcePath.empty() ? g_statusMessage : "Installer: original media detected.");
+    Uwp::LogStartup("Installer: initializing input.");
+#endif
 	input::Init();
 
+#ifndef SHADOW_RECOMP_UWP
 	EmbeddedPlayer::Init();
 	NFD_Init();
+#else
+    bool initializeAudioAfterFirstFrame = true;
+    Uwp::LogStartup("Installer: opening the first screen.");
+#endif
 
 	GameWindow::SetFullscreenCursorVisibility(true);
 	s_isVisible = true;
@@ -1353,6 +1377,10 @@ bool InstallerWizard::Run(std::filesystem::path installPath)
 		{
 			g_browseClicked = false;
 
+#ifdef SHADOW_RECOMP_UWP
+            g_sourcePath = Uwp::NextInstallSource(g_sourcePath, g_statusMessage);
+            g_cursorPickDefault = true;
+#else
 			nfdu8filteritem_t filters[] = { {"Xbox ISO or default.xbe", "iso,xbe"} };
 			nfdu8char_t* outPath = nullptr;
 			nfdresult_t result = NFD_OpenDialogU8(&outPath, filters, 1, nullptr);
@@ -1368,6 +1396,7 @@ bool InstallerWizard::Run(std::filesystem::path installPath)
 			{
 				g_statusMessage = NFD_GetError();
 			}
+#endif
 		}
 
 		SDL_Event event;
@@ -1401,6 +1430,17 @@ bool InstallerWizard::Run(std::filesystem::path installPath)
 		input::Update();
 		Video::Present(nullptr); // host thread: no guest context
 
+#ifdef SHADOW_RECOMP_UWP
+        if (initializeAudioAfterFirstFrame)
+        {
+            initializeAudioAfterFirstFrame = false;
+            Uwp::LogStartup("Installer: initializing audio after the first frame.");
+            if (EmbeddedPlayer::Init())
+                Uwp::LogStartup("Installer: audio ready.");
+            else
+                Uwp::LogStartup(fmt::format("Installer: audio unavailable. Continuing setup. {}", SDL_GetError()));
+        }
+#endif
 		framePacer.EndFrame(FramePacer::WaitMode::SleepOnly);
 	}
 
@@ -1421,7 +1461,9 @@ bool InstallerWizard::Run(std::filesystem::path installPath)
 	}
 	Config::Save();
 
+#ifndef SHADOW_RECOMP_UWP
 	NFD_Quit();
+#endif
 	InstallerWizard::Shutdown();
 	EmbeddedPlayer::Shutdown();
 

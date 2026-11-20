@@ -1,4 +1,7 @@
 #include "config.h"
+#ifdef SHADOW_RECOMP_UWP
+#include <os/uwp/platform.h>
+#endif
 #include <os/logger.h>
 #include <ui/game_window.h>
 #include <user/paths.h>
@@ -749,7 +752,11 @@ bool ConfigDef<T, isHidden>::IsValueChanged()
 }
 std::filesystem::path Config::GetConfigPath()
 {
+#ifdef SHADOW_RECOMP_UWP
+    return Uwp::GetLocalStatePath() / "config.toml";
+#else
     return GetUserPath() / "config.toml";
+#endif
 }
 
 void Config::CreateCallbacks()
@@ -889,7 +896,8 @@ void Config::Save()
 {
     LOGN("Saving configuration...");
 
-    auto userPath = GetUserPath();
+    const auto configPath = GetConfigPath();
+    const auto userPath = configPath.parent_path();
 
     if (!std::filesystem::exists(userPath))
         std::filesystem::create_directory(userPath);
@@ -915,7 +923,7 @@ void Config::Save()
         result += tomlDef + '\n';
     }
 
-    std::ofstream out(GetConfigPath());
+    std::ofstream out(configPath);
 
     if (out.is_open())
     {

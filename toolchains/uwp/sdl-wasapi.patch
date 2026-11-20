@@ -1,0 +1,169 @@
+diff --git a/src/audio/wasapi/SDL_wasapi.c b/src/audio/wasapi/SDL_wasapi.c
+index 122fc8f..2dbac21 100644
+--- a/src/audio/wasapi/SDL_wasapi.c
++++ b/src/audio/wasapi/SDL_wasapi.c
+@@ -644,10 +644,9 @@ static void WASAPI_CloseDevice(SDL_AudioDevice *device)
+     }
+ }
+ 
+-static bool mgmtthrtask_PrepDevice(void *userdata)
++// WASAPI_ActivateDevice calls this on the management thread after activation.
++bool WASAPI_PrepDevice(SDL_AudioDevice *device)
+ {
+-    SDL_AudioDevice *device = (SDL_AudioDevice *)userdata;
+-
+     /* !!! FIXME: we could request an exclusive mode stream, which is lower latency;
+        !!!  it will write into the kernel's audio buffer directly instead of
+        !!!  shared memory that a user-mode mixer then writes to the kernel with
+@@ -874,13 +873,6 @@ static bool mgmtthrtask_PrepDevice(void *userdata)
+     return true; // good to go.
+ }
+ 
+-// This is called once a device is activated, possibly asynchronously.
+-bool WASAPI_PrepDevice(SDL_AudioDevice *device)
+-{
+-    bool rc = true;
+-    return (WASAPI_ProxyToManagementThread(mgmtthrtask_PrepDevice, device, &rc) && rc);
+-}
+-
+ static bool WASAPI_OpenDevice(SDL_AudioDevice *device)
+ {
+     // Initialize all variables that we clean on shutdown
+diff --git a/src/audio/wasapi/SDL_wasapi_winrt.cpp b/src/audio/wasapi/SDL_wasapi_winrt.cpp
+index 3ef3cb2..8c72c56 100644
+--- a/src/audio/wasapi/SDL_wasapi_winrt.cpp
++++ b/src/audio/wasapi/SDL_wasapi_winrt.cpp
+@@ -213,7 +213,8 @@ static SDL_WasapiDeviceEventHandler *recording_device_event_handler;
+ 
+ bool WASAPI_PlatformInit(void)
+ {
+-    return true;
++    const HRESULT result = RoInitialize(RO_INIT_MULTITHREADED);
++    return SUCCEEDED(result) || WIN_SetErrorFromHRESULT("WASAPI could not initialize WinRT on the audio thread", result);
+ }
+ 
+ static void StopWasapiHotplug(void)
+@@ -227,6 +228,7 @@ static void StopWasapiHotplug(void)
+ void WASAPI_PlatformDeinit(void)
+ {
+     StopWasapiHotplug();
++    RoUninitialize();
+ }
+ 
+ void WASAPI_PlatformDeinitializeStart(void)
+@@ -237,6 +239,18 @@ void WASAPI_PlatformDeinitializeStart(void)
+ 
+ void WASAPI_EnumerateEndpoints(SDL_AudioDevice **default_playback, SDL_AudioDevice **default_recording)
+ {
++#ifdef __XBOXSERIES__
++    // Use the system's automatically routed playback endpoint. The game does not capture audio.
++    // DEVINTERFACE_AUDIO_RENDER tells WASAPI to follow the default output.
++    LPWSTR handle = SDL_wcsdup(L"{E6327CAD-DCEC-4949-AE8A-991E976A79D2}");
++    if (handle) {
++        *default_playback = SDL_AddAudioDevice(false, "Xbox default audio output", nullptr, handle);
++        if (!*default_playback) {
++            SDL_free(handle);
++        }
++    }
++    *default_recording = nullptr;
++#else
+     Platform::String ^ defdevid;
+ 
+     // DeviceWatchers will fire an Added event for each existing device at
+@@ -255,32 +269,32 @@ void WASAPI_EnumerateEndpoints(SDL_AudioDevice **default_playback, SDL_AudioDevi
+     if (defdevid) {
+         *default_recording = FindWinRTAudioDevice(defdevid->Data());
+     }
++#endif
+ }
+ 
+ class SDL_WasapiActivationHandler : public RuntimeClass<RuntimeClassFlags<ClassicCom>, FtmBase, IActivateAudioInterfaceCompletionHandler>
+ {
+ public:
+     SDL_WasapiActivationHandler() : completion_semaphore(SDL_CreateSemaphore(0)) { SDL_assert(completion_semaphore != NULL); }
++    ~SDL_WasapiActivationHandler() { SDL_DestroySemaphore(completion_semaphore); }
+     STDMETHOD(ActivateCompleted)(IActivateAudioInterfaceAsyncOperation *operation);
+-    void WaitForCompletion();
++    bool WaitForCompletion() const;
+ private:
+     SDL_Semaphore *completion_semaphore;
+ };
+ 
+-void SDL_WasapiActivationHandler::WaitForCompletion()
++bool SDL_WasapiActivationHandler::WaitForCompletion() const
+ {
+-    if (completion_semaphore) {
+-        SDL_WaitSemaphore(completion_semaphore);
+-        SDL_DestroySemaphore(completion_semaphore);
+-        completion_semaphore = NULL;
+-    }
++    return completion_semaphore && SDL_WaitSemaphoreTimeout(completion_semaphore, 5000);
+ }
+ 
+ HRESULT
+ SDL_WasapiActivationHandler::ActivateCompleted(IActivateAudioInterfaceAsyncOperation *async)
+ {
+     // Just set a flag, since we're probably in a different thread. We'll pick it up and init everything on our own thread to prevent races.
+-    SDL_SignalSemaphore(completion_semaphore);
++    if (completion_semaphore) {
++        SDL_SignalSemaphore(completion_semaphore);
++    }
+     return S_OK;
+ }
+ 
+@@ -294,43 +308,36 @@ bool WASAPI_ActivateDevice(SDL_AudioDevice *device)
+     LPCWSTR devid = (LPCWSTR) device->handle;
+     SDL_assert(devid != NULL);
+ 
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "WASAPI WinRT: requesting playback activation");
+     ComPtr<SDL_WasapiActivationHandler> handler = Make<SDL_WasapiActivationHandler>();
+     if (handler == nullptr) {
+         return SDL_SetError("Failed to allocate WASAPI activation handler");
+     }
+ 
+-    handler.Get()->AddRef(); // we hold a reference after ComPtr destructs on return, causing a Release, and Release ourselves in WASAPI_PlatformDeleteActivationHandler(), etc.
+-    device->hidden->activation_handler = handler.Get();
+-
+-    IActivateAudioInterfaceAsyncOperation *async = nullptr;
+-    const HRESULT ret = ActivateAudioInterfaceAsync(devid, __uuidof(IAudioClient), nullptr, handler.Get(), &async);
+-
+-    if (FAILED(ret) || async == nullptr) {
+-        if (async != nullptr) {
+-            async->Release();
+-        }
+-        handler.Get()->Release();
++    ComPtr<IActivateAudioInterfaceAsyncOperation> async;
++    const HRESULT ret = ActivateAudioInterfaceAsync(devid, __uuidof(IAudioClient), nullptr, handler.Get(), async.GetAddressOf());
++    if (FAILED(ret)) {
+         return WIN_SetErrorFromHRESULT("WASAPI can't activate requested audio endpoint", ret);
+     }
+-
+-    // !!! FIXME: the problems in SDL2 that needed this to be synchronous are _probably_ solved by SDL3, and this can block indefinitely if a user prompt is shown to get permission to use a microphone.
+-    handler.Get()->WaitForCompletion();  // block here until we have an answer, so this is synchronous to us after all.
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "WASAPI WinRT: waiting for activation completion");
++    if (!async || !handler->WaitForCompletion()) {
++        return SDL_SetError("WASAPI timed out waiting for audio endpoint activation");
++    }
+ 
+     HRESULT activateRes = S_OK;
+-    IUnknown *iunknown = nullptr;
+-    const HRESULT getActivateRes = async->GetActivateResult(&activateRes, &iunknown);
+-    async->Release();
++    ComPtr<IUnknown> iunknown;
++    const HRESULT getActivateRes = async->GetActivateResult(&activateRes, iunknown.GetAddressOf());
+     if (FAILED(getActivateRes)) {
+         return WIN_SetErrorFromHRESULT("Failed to get WASAPI activate result", getActivateRes);
+     } else if (FAILED(activateRes)) {
+         return WIN_SetErrorFromHRESULT("Failed to activate WASAPI device", activateRes);
+     }
+ 
+-    iunknown->QueryInterface(IID_PPV_ARGS(&device->hidden->client));
+-    if (!device->hidden->client) {
++    if (!iunknown || FAILED(iunknown->QueryInterface(IID_PPV_ARGS(&device->hidden->client)))) {
+         return SDL_SetError("Failed to query WASAPI client interface");
+     }
+ 
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "WASAPI WinRT: configuring the activated device");
+     if (!WASAPI_PrepDevice(device)) {
+         return false;
+     }

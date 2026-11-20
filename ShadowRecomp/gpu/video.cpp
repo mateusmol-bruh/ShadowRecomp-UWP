@@ -25,6 +25,9 @@
 #include <cpu/guest_thread.h>
 #include <decompressor.h>
 #include <input/input.h>
+#ifdef SHADOW_RECOMP_UWP
+#include <os/uwp/platform.h>
+#endif
 #include <plume_vulkan.h>
 
 #include <res/bc_diff/button_bc_diff_gc.bin.h>
@@ -2178,6 +2181,7 @@ static const char* Vulkan_GetCurPresentModeName(VkPresentModeKHR mode)
 // a dead swap chain even if it retries after, this can happen during a vsync toggle.
 // Fix: Destroy the old instance so Plume always build from scratch.
 
+#ifndef SHADOW_RECOMP_UWP
 static bool Vulkan_RebuildSwapChain(const char* failReason)
 {
 	static uint32_t failedTries = 0;
@@ -2224,6 +2228,8 @@ static bool Vulkan_RebuildSwapChain(const char* failReason)
 	return true;
 }
 
+#endif
+
 static void ComputeViewportSize();
 
 static std::atomic<bool> g_swapChainRebuildRequested{ false };
@@ -2253,9 +2259,11 @@ static void CheckSwapChain(bool canRebuild)
 			}
 		}
 
+#ifndef SHADOW_RECOMP_UWP
 		if (g_vulkan)
 			g_swapChainValid = Vulkan_RebuildSwapChain(isSwapChainInvalid ? "Swap Chain was invalid" : "size or present mode changed");
 		else
+#endif
 			g_swapChainValid = g_swapChain->resize();
 
 		g_needsResize = g_swapChainValid;
@@ -2521,7 +2529,17 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	ImGui::CreateContext();
 	ImPlot::CreateContext();
 
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::LogStartup("Video: initializing SDL window.");
+#endif
 	GameWindow::Init(sdlVideoDriver);
+    if (!GameWindow::s_pWindow)
+    {
+#ifdef SHADOW_RECOMP_UWP
+        Uwp::LogStartup(fmt::format("Video: SDL could not open its window: {}", SDL_GetError()));
+#endif
+        return false;
+    }
 
 
 #ifdef SHADOW_RECOMP_D3D12
@@ -2532,7 +2550,17 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	using RenderInterfaceFunction = std::unique_ptr<RenderInterface>(void);
 	std::vector<RenderInterfaceFunction*> interfaceFunctions;
 
-#ifdef SHADOW_RECOMP_D3D12
+#ifdef SHADOW_RECOMP_UWP
+    g_vulkan = false;
+    Config::GraphicsAPI = EGraphicsAPI::D3D12;
+    if (!GameWindow::s_renderWindow)
+    {
+        Uwp::LogStartup("Video: SDL did not provide a CoreWindow.");
+        return false;
+    }
+    Uwp::LogStartup("Video: creating the D3D12 device.");
+    interfaceFunctions.push_back(CreateD3D12Interface);
+#elif defined(SHADOW_RECOMP_D3D12)
 	if (graphicsApiRetry)
 	{
 		// If we are attempting to create again after a reboot due to a crash, swap the order.
@@ -2549,7 +2577,7 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	{
 		RenderInterfaceFunction* interfaceFunction = interfaceFunctions[i];
 
-#ifdef SHADOW_RECOMP_D3D12
+#if defined(SHADOW_RECOMP_D3D12) && !defined(SHADOW_RECOMP_UWP)
 		// Wrap the device creation in __try/__except to survive from driver crashes.
 		__try
 #endif
@@ -2574,13 +2602,15 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 					g_hardwareDepthResolve = (deviceDescription.vendor != RenderDeviceVendor::INTEL);
 				}
 
+#ifndef SHADOW_RECOMP_UWP
 				g_vulkan = (interfaceFunction == CreateVulkanInterface);
+#endif
 #endif
 
 				break;
 			}
 		}
-#ifdef SHADOW_RECOMP_D3D12
+#if defined(SHADOW_RECOMP_D3D12) && !defined(SHADOW_RECOMP_UWP)
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
 			if (graphicsApiRetry)
@@ -2600,6 +2630,9 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 
 	if (g_device == nullptr)
 	{
+#ifdef SHADOW_RECOMP_UWP
+        Uwp::LogStartup("Video: could not initialize a compatible D3D12 device.");
+#endif
 		return false;
 	}
 
@@ -2611,6 +2644,9 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	}
 #endif
 
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::LogStartup(fmt::format("Video: D3D12 device ready ({}). Setting up graphics resources.", g_device->getDescription().name));
+#endif
 	g_capabilities = g_device->getCapabilities();
 	FixedFunctionVertexShaderVariants::Initialize(g_device.get(), g_vulkan);
 	FixedFunctionPixelShaderVariants::Initialize(g_device.get(), g_vulkan);
@@ -2679,7 +2715,21 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	swapChainDesc.maxFrameLatency = Config::MaxFrameLatency;
 	swapChainDesc.enablePresentWait = g_capabilities.presentWait;
 
+#ifdef SHADOW_RECOMP_UWP
+    uint32_t width = 0;
+    uint32_t height = 0;
+    Uwp::GetRenderSize(width, height);
+    Uwp::LogStartup(fmt::format("Video: creating CoreWindow swap chain ({}x{}).", width, height));
+#endif
 	g_swapChain = g_queue->createSwapChain(swapChainDesc);
+#ifdef SHADOW_RECOMP_UWP
+    if (!g_swapChain || g_swapChain->needsResize())
+    {
+        Uwp::LogStartup("Video: CoreWindow swap chain initialization failed.");
+        return false;
+    }
+    Uwp::LogStartup("Video: CoreWindow swap chain ready.");
+#endif
 	SetSwapChainVsync();
 	g_swapChainValid = !g_swapChain->needsResize();
 
@@ -2834,6 +2884,9 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 
 	g_commandLists[g_frame]->barriers(RenderBarrierStage::NONE, blankTextureBarriers, std::size(blankTextureBarriers));
 
+#ifdef SHADOW_RECOMP_UWP
+    Uwp::LogStartup("Video: renderer initialized.");
+#endif
 	return true;
 }
 
@@ -4006,6 +4059,15 @@ static void WaitForFrameEnds(uint32_t count)
 	uint32_t done = g_frameEndsDone.load();
 	while (done != count)
 	{
+#ifdef SHADOW_RECOMP_UWP
+        // DXGI Present on the render thread can wait on the CoreWindow event pump.
+        if (SDL_IsMainThread())
+        {
+            SDL_PumpEvents();
+            SDL_Delay(1);
+        }
+        else
+#endif
 		g_frameEndsDone.wait(done);
 		done = g_frameEndsDone.load();
 	}
@@ -4080,6 +4142,16 @@ void Video::Present(X86Context* ctx)
 
 	std::unique_lock presentLock(g_presentMutex);
 
+#ifdef SHADOW_RECOMP_UWP
+    static bool firstInstallerFrame = true;
+    static bool firstGameFrame = true;
+    bool& firstFrame = ctx == nullptr ? firstInstallerFrame : firstGameFrame;
+    if (firstFrame)
+    {
+        firstFrame = false;
+        Uwp::LogStartup(ctx == nullptr ? "Video: submitting first installer frame." : "Video: submitting first game frame.");
+    }
+#endif
 	// Get actual frame delivery rate seen by the OS.
 	{
 		static std::chrono::steady_clock::time_point s_prevPresentTime;
@@ -4317,6 +4389,21 @@ static void ProcEndFrame(const RenderCommand& cmd)
 	{
 		RenderCommandSemaphore* signalSemaphores[] = { g_renderSemaphores[g_frame].get() };
 		g_swapChainValid = g_swapChain->present(g_backBufferIndex, signalSemaphores, std::size(signalSemaphores));
+#ifdef SHADOW_RECOMP_UWP
+        static bool loggedFailure = false;
+        static bool presented = false;
+        if (g_swapChainValid && !presented)
+        {
+            presented = true;
+            Uwp::LogStartup("Video: first DXGI Present succeeded.");
+            input::EnableGamepadPolling();
+        }
+        else if (!g_swapChainValid && !presented && !loggedFailure)
+        {
+            loggedFailure = true;
+            Uwp::LogStartup("Video: first DXGI Present failed.");
+        }
+#endif
 	}
 	presentExecuted = true;
 

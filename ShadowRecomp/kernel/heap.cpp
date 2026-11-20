@@ -11,7 +11,14 @@ constexpr size_t HEAP_END = 0xA0000000;
 
 // The physical heap has to stop before the hardware apertures, otherwise we will
 // risk a memory overflow on top of the NV2A register region.
-constexpr size_t PHYSICAL_HEAP_END = NV2A_APERTURE_BASE;
+#ifdef SHADOW_RECOMP_UWP
+static_assert(HEAP_BEGIN == UwpGuestHeapBegin && HEAP_END == UwpPhysicalHeapBegin);
+constexpr size_t GUEST_HEAP_SIZE = UwpGuestHeapSize;
+constexpr size_t PHYSICAL_HEAP_SIZE = UwpPhysicalHeapSize;
+#else
+constexpr size_t GUEST_HEAP_SIZE = HEAP_END - HEAP_BEGIN;
+constexpr size_t PHYSICAL_HEAP_SIZE = NV2A_APERTURE_BASE - HEAP_END;
+#endif
 
 extern uint8_t* g_nv2aPtr;
 
@@ -23,10 +30,10 @@ void Heap::Init()
 	}
 
 	LOG_UTILITY("Initializing Heap...");
-	heap = o1heapInit(g_memory.Translate(HEAP_BEGIN), HEAP_END - HEAP_BEGIN);
-	physicalHeap = o1heapInit(g_memory.Translate(HEAP_END), PHYSICAL_HEAP_END - HEAP_END);
-	LOGFN("Regular Heap: guest 0x{:08X} - 0x{:08X}", HEAP_BEGIN, HEAP_END);
-	LOGFN("Physical Heap: guest 0x{:08X} - 0x{:08X}", HEAP_END, PHYSICAL_HEAP_END);
+	heap = o1heapInit(g_memory.Translate(HEAP_BEGIN), GUEST_HEAP_SIZE);
+	physicalHeap = o1heapInit(g_memory.Translate(HEAP_END), PHYSICAL_HEAP_SIZE);
+	LOGFN("Regular Heap: guest 0x{:08X} - 0x{:08X}", HEAP_BEGIN, HEAP_BEGIN + GUEST_HEAP_SIZE);
+	LOGFN("Physical Heap: guest 0x{:08X} - 0x{:08X}", HEAP_END, HEAP_END + PHYSICAL_HEAP_SIZE);
 
 	// The game gets this pointer from D3DK::CMiniport::MapRegisters and then
 	// addresses NV2A registers off it.
@@ -51,6 +58,9 @@ void* Heap::AllocPhysical(size_t size, size_t alignment)
 	std::lock_guard lock(physicalMutex);
 
 	void* ptr = o1heapAllocate(physicalHeap, size + alignment);
+	if (!ptr)
+		return nullptr;
+
 	size_t aligned = ((size_t)ptr + alignment) & ~(alignment - 1);
 
 	*((void**)aligned - 1) = ptr;
@@ -140,10 +150,10 @@ uint32_t XAllocMem(uint32_t size, uint32_t flags)
 		g_userHeap.AllocPhysical(size, (1ull << ((flags >> 24) & 0xF))) :
 		g_userHeap.Alloc(size);
 
+	if (!ptr)
+		return 0;
 	if ((flags & 0x40000000) != 0)
 		memset(ptr, 0, size);
-
-	assert(ptr);
 	return g_memory.MapVirtual(ptr);
 }
 

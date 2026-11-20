@@ -1,0 +1,94 @@
+--- a/plume_d3d12.cpp
++++ b/plume_d3d12.cpp
+@@ -6,6 +6,7 @@
+ //
+ 
+ #include "plume_d3d12.h"
++#include <os/uwp/platform.h>
+ 
+ #include <unordered_set>
+ 
+@@ -1328,9 +1329,6 @@
+         getWindowSize(width, height);
+ 
+         swapChainFlags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+-        if (commandQueue->device->renderInterface->allowTearing) {
+-            swapChainFlags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+-        }
+         
+         DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
+         swapChainDesc.BufferCount = desc.textureCount;
+@@ -1338,25 +1336,27 @@
+         swapChainDesc.Height = height;
+         swapChainDesc.Format = nativeFormat;
+         swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+-        swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
++        swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
++        swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
++        swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+         swapChainDesc.SampleDesc.Count = 1;
+         swapChainDesc.Flags = swapChainFlags;
+ 
+-        IDXGISwapChain1 *swapChain1;
++        IDXGISwapChain1 *swapChain1 = nullptr;
+         IDXGIFactory4 *dxgiFactory = commandQueue->device->renderInterface->dxgiFactory;
+-        HRESULT res = dxgiFactory->CreateSwapChainForHwnd(commandQueue->d3d, desc.renderWindow, &swapChainDesc, nullptr, nullptr, &swapChain1);
++        HRESULT res = dxgiFactory->CreateSwapChainForCoreWindow(commandQueue->d3d,
++            reinterpret_cast<IUnknown *>(desc.renderWindow), &swapChainDesc, nullptr, &swapChain1);
+         if (FAILED(res)) {
+-            fprintf(stderr, "CreateSwapChainForHwnd failed with error code 0x%lX.\n", res);
++            fprintf(stderr, "CreateSwapChainForCoreWindow failed with error code 0x%lX.\n", res);
+             return;
+         }
+ 
+-        res = dxgiFactory->MakeWindowAssociation(desc.renderWindow, DXGI_MWA_NO_ALT_ENTER);
++        res = swapChain1->QueryInterface(IID_PPV_ARGS(&d3d));
++        swapChain1->Release();
+         if (FAILED(res)) {
+-            fprintf(stderr, "MakeWindowAssociation failed with error code 0x%lX.\n", res);
+             return;
+         }
+ 
+-        d3d = static_cast<IDXGISwapChain3 *>(swapChain1);
+         d3d->SetMaximumFrameLatency(desc.maxFrameLatency);
+         waitableObject = d3d->GetFrameLatencyWaitableObject();
+ 
+@@ -1376,7 +1376,7 @@
+     }
+ 
+     D3D12SwapChain::~D3D12SwapChain() {
+-        for (uint32_t i = 0; i < desc.textureCount; i++) {
++        for (uint32_t i = 0; i < textures.size(); i++) {
+             if (textures[i].d3d != nullptr) {
+                 textures[i].d3d->Release();
+                 textures[i].d3d = nullptr;
+@@ -1401,7 +1401,7 @@
+         assert(desc.enablePresentWait && "Present wait should've been explicitly enabled during swap chain creation before using the wait function.");
+ 
+         if (waitableObject != NULL) {
+-            WaitForSingleObject(waitableObject, INFINITE);
++            WaitForSingleObjectEx(waitableObject, INFINITE, FALSE);
+         }
+     }
+ 
+@@ -1418,7 +1418,7 @@
+             textures[i].d3d = nullptr;
+         }
+ 
+-        HRESULT res = d3d->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, swapChainFlags);
++        HRESULT res = d3d->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, swapChainFlags);
+         if (FAILED(res)) {
+             fprintf(stderr, "ResizeBuffers failed with error code 0x%lX.\n", res);
+             return false;
+@@ -1451,10 +1451,7 @@
+     }
+ 
+     void D3D12SwapChain::getWindowSize(uint32_t &dstWidth, uint32_t &dstHeight) const {
+-        RECT rect;
+-        GetClientRect(desc.renderWindow, &rect);
+-        dstWidth = rect.right - rect.left;
+-        dstHeight = rect.bottom - rect.top;
++        Uwp::GetRenderSize(dstWidth, dstHeight);
+     }
+ 
+     void D3D12SwapChain::setTextures() {

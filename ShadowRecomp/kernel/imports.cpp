@@ -274,7 +274,8 @@ uint32_t DbgPrint(PCHAR Format, ...) {
 
 void ExFreePool(void* ptr)
 {
-	g_userHeap.Free(g_memory.Translate((uint32_t)(uintptr_t)ptr));
+	if (ptr)
+		g_userHeap.Free(ptr);
 }
 
 void* ExAllocatePoolWithTag
@@ -283,7 +284,7 @@ void* ExAllocatePoolWithTag
 	IN uint32_t Tag
 )
 {
-	void* ptr = reinterpret_cast<PVOID>(g_memory.MapVirtual(g_userHeap.Alloc(NumberOfBytes > 0 ? NumberOfBytes : 1)));
+	void* ptr = g_userHeap.Alloc(NumberOfBytes);
 	LOGF_UTILITY("ptr: {}", ptr);
 	return ptr;
 }
@@ -733,7 +734,7 @@ std::uint8_t KfRaiseIrql(std::uint8_t NewIrql)
 
 uint32_t* MmAllocateContiguousMemory(uint32_t NumberOfBytes)
 {
-	return reinterpret_cast<uint32_t*>(g_memory.MapVirtual(g_userHeap.AllocPhysical(NumberOfBytes, GPU_ALIGNMENT)));
+	return static_cast<uint32_t*>(g_userHeap.AllocPhysical(NumberOfBytes, GPU_ALIGNMENT));
 }
 
 uint32_t* MmAllocateContiguousMemoryEx(uint32_t NumberOfBytes, uint32_t LowestAcceptableAddress,
@@ -741,13 +742,13 @@ uint32_t* MmAllocateContiguousMemoryEx(uint32_t NumberOfBytes, uint32_t LowestAc
 	uint32_t ProtectionType
 )
 {
-	return reinterpret_cast<uint32_t*>(g_memory.MapVirtual(g_userHeap.AllocPhysical(NumberOfBytes, Alignment)));
+	return static_cast<uint32_t*>(g_userHeap.AllocPhysical(NumberOfBytes, Alignment));
 }
 
 PVOID MmClaimGpuInstanceMemory(SIZE_T NumberOfBytes, ULONG Protect
 ) {
 
-	return reinterpret_cast<PVOID>(g_memory.MapVirtual(g_userHeap.AllocPhysical(NumberOfBytes, GPU_ALIGNMENT)));
+	return g_userHeap.AllocPhysical(NumberOfBytes, GPU_ALIGNMENT);
 }
 
 void MmFreeContiguousMemory(uint32_t guestAddress)

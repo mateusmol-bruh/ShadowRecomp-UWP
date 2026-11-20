@@ -7,6 +7,9 @@
 #include <app.h>
 #include <sdl_events.h>
 #include <os/logger.h>
+#ifdef SHADOW_RECOMP_UWP
+#include <os/uwp/platform.h>
+#endif
 
 input::EInputDevice input::g_inputDevice;
 input::EInputDevice input::g_inputDeviceController;
@@ -139,6 +142,9 @@ public:
 
 	input::EInputDevice GetInputDevice() const
 	{
+#ifdef SHADOW_RECOMP_UWP
+		return input::EInputDevice::Xbox;
+#else
 		switch (GetControllerType())
 		{
 		case SDL_GAMEPAD_TYPE_PS3:
@@ -151,6 +157,7 @@ public:
 		default:
 			return input::EInputDevice::Unknown;
 		}
+#endif
 	}
 
 	const char* GetControllerName() const
@@ -543,10 +550,16 @@ static void SyncControllers()
 			break;
 		}
 
+#ifdef SHADOW_RECOMP_UWP
+		Uwp::LogStartup("Input: opening the SDL gamepad.");
+#endif
 		auto controller = Controller(gamepads[i]);
 		if (controller.controller)
 		{
 			g_controllers[freeIndex] = controller;
+#ifdef SHADOW_RECOMP_UWP
+			Uwp::LogStartup("Input: SDL gamepad open.");
+#endif
 		}
 	}
 
@@ -630,10 +643,33 @@ void input::SetChaosAura(ELedAura mode)
 	App::s_chaosMode.store(mode, std::memory_order_relaxed);
 }
 
+#ifdef SHADOW_RECOMP_UWP
+static std::atomic<bool> s_enableGamepadPolling{ false };
+static bool s_gamepadsDisabled = false;
+
+void input::EnableGamepadPolling()
+{
+	s_enableGamepadPolling.store(true, std::memory_order_release);
+}
+#endif
+
 void input::Update()
 {
+#ifdef SHADOW_RECOMP_UWP
+	if (!s_gamepadsDisabled && s_enableGamepadPolling.load(std::memory_order_acquire)
+		&& (SDL_GetWindowFlags(GameWindow::s_pWindow) & SDL_WINDOW_INPUT_FOCUS)
+		&& SDL_WasInit(SDL_INIT_GAMEPAD))
+	{
+		static bool firstPoll = true;
+		if (std::exchange(firstPoll, false))
+			Uwp::LogStartup("Input: beginning controller polling after the first frame.");
+		Uwp::UpdateGamepads();
+	}
+#endif
 	MainThreadDispatcher::Get().Flush();
+#ifndef SHADOW_RECOMP_UWP
 	ApplyControllerLEDs();
+#endif
 	PublishPadFrame();
 }
 
@@ -739,8 +775,6 @@ void input::Init()
 	if (s_isInit)
 		return;
 
-	s_isInit = true;
-
 	SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 	SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_GAMECUBE, "1");
 	SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS3, "1");
@@ -749,16 +783,46 @@ void input::Init()
 	SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_PLAYER_LED, "0");
 	SDL_SetHint(SDL_HINT_JOYSTICK_ENHANCED_REPORTS, "1");
 	SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_WII, "1");
+#ifdef SHADOW_RECOMP_UWP
+	SDL_SetHint(SDL_HINT_JOYSTICK_WGI, "0");
+	std::error_code error;
+	s_gamepadsDisabled = std::filesystem::is_regular_file(Uwp::GetLocalStatePath() / "disable-gamepads.txt", error);
+#else
 	SDL_SetHint(SDL_HINT_XINPUT_ENABLED, "1");
+#endif
 	SDL_SetHint(SDL_HINT_JOYSTICK_THREAD, "1");
 
-	SDL_InitSubSystem(SDL_INIT_EVENTS);
+#ifdef SHADOW_RECOMP_UWP
+	if (s_gamepadsDisabled)
+	{
+		if (SDL_InitSubSystem(SDL_INIT_EVENTS))
+		{
+			s_isInit = true;
+			SDL_AddEventWatch(Input_OnSDLEvent, nullptr);
+		}
+		Uwp::LogStartup("Input: Xbox gamepad polling disabled by LocalState/disable-gamepads.txt.");
+		return;
+	}
+	Uwp::LogStartup("Input: initializing SDL gamepad events.");
+#endif
+	if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD))
+	{
+		LOGFN_ERROR("SDL gamepad initialization failed: {}", SDL_GetError());
+#ifdef SHADOW_RECOMP_UWP
+		Uwp::LogStartup(fmt::format("Input: SDL gamepad initialization failed: {}", SDL_GetError()));
+#endif
+		return;
+	}
+	s_isInit = true;
 	SDL_AddEventWatch(Input_OnSDLEvent, nullptr);
-	SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMEPAD);
 
-	// just to ensure controller is available frame 1
+#ifdef SHADOW_RECOMP_UWP
+	Uwp::LogStartup("Input: SDL events ready. Waiting for the first presented frame.");
+#else
+	// Make connected controllers available on the first frame.
 	SyncControllers();
 	input::Update();
+#endif
 }
 
 input::EInputDevice input::GetPadDevice(uint32_t playerIndex)

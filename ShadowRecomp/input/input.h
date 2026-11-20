@@ -120,6 +120,9 @@ namespace input
 
     void Init();
     void Update();
+#ifdef SHADOW_RECOMP_UWP
+    void EnableGamepadPolling();
+#endif
 	void SetChaosAura(ELedAura mode);
     uint32_t GetState(uint32_t dwUserIndex, XINPUT_STATE* pState);
     uint32_t SetState(uint32_t dwUserIndex, XboxVibrationPacket* outPacket);

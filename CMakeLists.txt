@@ -1,7 +1,15 @@
-﻿# CMakeList.txt : Top-level CMake project file, do global configuration
+# CMakeList.txt : Top-level CMake project file, do global configuration
 # and include sub-projects here.
 #
 cmake_minimum_required (VERSION 3.20)
+
+# Fail before downloading dependencies when the original build input is missing.
+if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ShadowRecompLib/private/default.xbe")
+        message(FATAL_ERROR "Copy default.xbe from your Xbox disc to ShadowRecompLib/private before configuring the UWP build.")
+    endif()
+    set(VCPKG_MANIFEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/toolchains/uwp")
+endif()
 
 if(NOT DEFINED ENV{VCPKG_ROOT})
     message(FATAL_ERROR "VCPKG_ROOT is not defined!")
@@ -28,6 +36,17 @@ endif()
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 project ("ShadowRecomp-ALL")
+
+if(WINDOWS_STORE)
+    set(SHADOW_RECOMP_UWP ON)
+    if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8 OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "Xbox UWP requires the x64 clang-cl target.")
+    endif()
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    link_directories(BEFORE "$ENV{VCToolsInstallDir}/lib/x64/store")
+    add_compile_definitions(SHADOW_RECOMP_UWP WINAPI_FAMILY=WINAPI_FAMILY_APP)
+    find_package(SDL3 CONFIG REQUIRED)
+endif()
 
 # Ship symbols with release builds (for now)
 if (MSVC)

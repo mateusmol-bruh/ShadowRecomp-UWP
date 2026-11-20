@@ -13,19 +13,32 @@
 #include <gpu/frame_pacing/timer_resolution.h>
 #include <input/input.h>
 #include <patches/multiplayer_mod_patches.h>
+#ifndef SHADOW_RECOMP_UWP
 #include <misc/rich_presence/shadow_rpc.h>
+#else
+#include <os/uwp/platform.h>
+#endif
 
+#ifndef SHADOW_RECOMP_UWP
 static std::thread::id g_mainThreadId = std::this_thread::get_id();
+#endif
 
 void App::Restart(std::vector<std::string> restartArgs)
 {
+#ifdef SHADOW_RECOMP_UWP
+    Config::Save();
+    os::process::StartProcess(os::process::GetExecutablePath(), restartArgs);
+#else
 	os::process::StartProcess(os::process::GetExecutablePath(), restartArgs, os::process::GetWorkingDirectory());
 	Exit();
+#endif
 }
 
 void App::Exit()
 {
+#ifndef SHADOW_RECOMP_UWP
 	RichPresence::ShadowRpc::Stop();
+#endif
 	Video::Shutdown();
 	AudioShutDown();
 	Config::Save();
@@ -103,11 +116,23 @@ std::atomic<bool> shouldQuit = false;
 // So we do a mid asm hook in the entry point function and put our loop there instead
 void UpdateSDLEventsMidAsmHook(X86Context& __restrict ctx, uint8_t* base)
 {
+#ifdef SHADOW_RECOMP_UWP
+	Uwp::LogStartup("Game thread: XBE bootstrap reached the SDL event loop.");
+#endif
 	SDL_Event event;
 	while (!shouldQuit)
 	{
+#ifdef SHADOW_RECOMP_UWP
+		if (!SDL_IsMainThread())
+		{
+			SDL_Delay(8);
+			continue;
+		}
+#endif
 		// fix unresponsive window
+#ifndef SHADOW_RECOMP_UWP
 		if (std::this_thread::get_id() == g_mainThreadId)
+#endif
 		{
 			MainThreadDispatcher::Get().Flush(); // This runs the callbacks needed from user's config
 			SDL_PumpEvents();

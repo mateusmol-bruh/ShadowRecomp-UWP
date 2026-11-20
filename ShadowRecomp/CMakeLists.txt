@@ -91,7 +91,14 @@ set(SHADOW_RECOMP_LOCALE_CXX_SOURCES
     "locale/locale.cpp"
 )
 
-if (WIN32)
+if (SHADOW_RECOMP_UWP)
+    set(SHADOW_RECOMP_OS_CXX_SOURCES
+        "os/uwp/platform.cpp"
+        "os/uwp/storage.cpp"
+        "os/uwp/gamepads.cpp"
+    )
+    set_source_files_properties("os/uwp/storage.cpp" PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+elseif (WIN32)
     set(SHADOW_RECOMP_OS_CXX_SOURCES
         "os/win32/logger_win32.cpp"
         "os/win32/process_win32.cpp"
@@ -276,6 +283,10 @@ set(SHADOW_RECOMP_CXX_SOURCES
     ${SHADOW_RECOMP_THIRDPARTY_SOURCES}
 )
 
+if(SHADOW_RECOMP_UWP)
+    list(REMOVE_ITEM SHADOW_RECOMP_CXX_SOURCES ${SHADOW_RECOMP_MISC_CXX_SOURCES})
+endif()
+
 include("version.cmake")
 
 set(VERSION_TXT "${PROJECT_SOURCE_DIR}/res/version.txt")
@@ -300,7 +311,17 @@ GenerateVersionSources(
     SHOW_BUILD_TYPE ${SHOW_GIT_INFO_AND_BUILD_TYPE}
 )
 
-if (WIN32)
+if (SHADOW_RECOMP_UWP)
+    add_executable(ShadowRecomp WIN32 ${SHADOW_RECOMP_CXX_SOURCES})
+    target_link_options(ShadowRecomp PRIVATE /APPCONTAINER)
+    target_include_directories(ShadowRecomp SYSTEM PRIVATE
+        "$ENV{WindowsSdkDir}/Include/${CMAKE_SYSTEM_VERSION}/cppwinrt"
+    )
+    find_package(Freetype REQUIRED)
+    # The MSDF target links FreeType privately. ImGui also needs its headers.
+    set_property(SOURCE "${SHADOW_RECOMP_THIRDPARTY_ROOT}/imgui/misc/freetype/imgui_freetype.cpp"
+        APPEND PROPERTY INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:Freetype::Freetype,INTERFACE_INCLUDE_DIRECTORIES>")
+elseif (WIN32)
     # Create binary version number for Win32 integer attributes.
     CreateVersionString(
         VERSION_TXT ${VERSION_TXT}
@@ -345,7 +366,12 @@ if (SHADOW_RECOMP_FLATPAK)
     )
 endif()
 
-if (SHADOW_RECOMP_D3D12)
+if(SHADOW_RECOMP_UWP)
+    if(NOT SHADOW_RECOMP_D3D12)
+        message(FATAL_ERROR "The Xbox UWP target requires Direct3D 12.")
+    endif()
+    target_compile_definitions(ShadowRecomp PRIVATE SHADOW_RECOMP_D3D12)
+elseif (SHADOW_RECOMP_D3D12)
     find_package(directx-headers CONFIG REQUIRED)
     find_package(directx12-agility CONFIG REQUIRED)
     target_compile_definitions(ShadowRecomp PRIVATE 
@@ -356,8 +382,10 @@ if (SHADOW_RECOMP_D3D12)
 endif()
 
 #find_package(directx-dxc REQUIRED)
-find_package(CURL REQUIRED)
-find_package(nfd REQUIRED)
+if(NOT SHADOW_RECOMP_UWP)
+    find_package(CURL REQUIRED)
+    find_package(nfd REQUIRED)
+endif()
 
 include(FetchContent)
 
@@ -370,7 +398,23 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(nlohmann_json)
 
 
-if (SHADOW_RECOMP_D3D12)
+if(SHADOW_RECOMP_UWP)
+    target_link_libraries(ShadowRecomp PRIVATE
+        SDL3::SDL3-shared windowsapp dxgi d3d12
+        Microsoft::DirectXShaderCompiler Microsoft::DXIL
+    )
+    add_custom_command(TARGET ShadowRecomp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:SDL3::SDL3-shared>"
+            "$<TARGET_FILE:Microsoft::DirectXShaderCompiler>"
+            "$<TARGET_FILE:Microsoft::DXIL>"
+            "$<TARGET_FILE_DIR:ShadowRecomp>"
+    )
+else()
+    target_link_libraries(ShadowRecomp PRIVATE discord-rpc SDL3::SDL3-static nfd::nfd CURL::libcurl)
+endif()
+
+if (SHADOW_RECOMP_D3D12 AND NOT SHADOW_RECOMP_UWP)
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/D3D12)
     add_custom_command(TARGET ShadowRecomp POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PROPERTY:Microsoft::DirectX12-Core,IMPORTED_LOCATION_RELEASE> ${CMAKE_CURRENT_BINARY_DIR}/D3D12
@@ -393,7 +437,7 @@ if (SHADOW_RECOMP_D3D12)
     )
 endif()
 
-if (WIN32)
+if (WIN32 AND NOT SHADOW_RECOMP_UWP)
     target_link_libraries(ShadowRecomp PRIVATE
         comctl32
         dwmapi
@@ -406,13 +450,11 @@ if (WIN32)
 endif()
 
 target_link_libraries(ShadowRecomp PRIVATE
-    discord-rpc
     fmt::fmt
     libzstd_static
     msdf-atlas-gen::msdf-atlas-gen
     o1heap
     XboxUtils
-    SDL3::SDL3-static
     SDL3_mixer::SDL3_mixer
     tomlplusplus::tomlplusplus
     ShadowRecompLib
@@ -420,8 +462,6 @@ target_link_libraries(ShadowRecomp PRIVATE
     plume
     XShaderRecompLib
     nlohmann_json::nlohmann_json
-    nfd::nfd
-    CURL::libcurl
 )
 
 

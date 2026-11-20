@@ -2,7 +2,7 @@
 
 struct PreloadContext
 {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(SHADOW_RECOMP_UWP)
     HANDLE handle{};
     HANDLE mappingHandle{};
     SIZE_T size{};

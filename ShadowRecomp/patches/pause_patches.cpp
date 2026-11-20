@@ -450,17 +450,18 @@ X86_OVERRIDE_FUNC(sub_5AEE0)
 		{
 			s_currentMode = PauseAction_Options;
 			OptionsMenu::Open(true, GetPausePadIndex());
-			s_isVisible = false;
-			ctx.AddEsp(1);
-
-			return;
 		}
 		else if (s_index == SelAchievements && s_AchievementRequest && AchievementMenu::s_isVisible == false)
 		{
 			s_currentMode = PauseAction_Achievements;
 			AchievementMenu::Open(GetPausePadIndex());
+		}
+
+		if (s_currentMode != 0)
+		{
 			s_isVisible = false;
-			ctx.AddEsp(1);
+			// The original ret 4 pops the return address and the frame-time argument.
+			ctx.AddEsp(2);
 			return;
 		}
 	}

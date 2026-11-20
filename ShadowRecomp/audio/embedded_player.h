@@ -8,7 +8,7 @@ struct EmbeddedPlayer
 
     static inline bool s_isActive = false;
 
-    static void Init();
+    static bool Init();
     static void Play(const char* name);
     static void PlayMusic();
     static void FadeOutMusic();

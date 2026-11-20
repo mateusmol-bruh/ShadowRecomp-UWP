@@ -83,6 +83,9 @@ static void PlayEmbeddedSound(EmbeddedSound s)
     }
 
     auto track = g_soundTracks[g_channelIndex % g_soundTracks.size()];
+    if (!track || !data.audio)
+        return;
+
     MIX_SetTrackAudio(track, data.audio);
     MIX_SetTrackGain(track, GetMasterVolume() * Config::EffectsVolume * EmbeddedPlayer::EFFECTS_VOLUME);
     MIX_PlayTrack(track, 0);
@@ -96,7 +99,9 @@ static bool InitMixer()
     if (g_mixer)
         return true;
 
-    MIX_Init();
+    if (!MIX_Init())
+        return false;
+
     SDL_AudioSpec spec{ SDL_AUDIO_F32, 2, XAUDIO_SAMPLES_HZ };
     g_mixer = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec);
     if (!g_mixer)
@@ -113,14 +118,24 @@ static bool InitMixer()
     return true;
 }
 
-void EmbeddedPlayer::Init()
+bool EmbeddedPlayer::Init()
 {
-    InitMixer();
+    if (!InitMixer())
+        return false;
+
+    s_isActive = true;
     g_musicTrack = MIX_CreateTrack(g_mixer);
+    if (!g_musicTrack)
+        return false;
 
     g_installerMusic = MIX_LoadAudioNoCopy(g_mixer, g_installer_music, sizeof(g_installer_music), false);
-    MIX_SetTrackAudio(g_musicTrack, g_installerMusic);
-    s_isActive = true;
+    if (!g_installerMusic || !MIX_SetTrackAudio(g_musicTrack, g_installerMusic))
+    {
+        MIX_DestroyTrack(g_musicTrack);
+        g_musicTrack = nullptr;
+        return false;
+    }
+    return true;
 }
 
 void EmbeddedPlayer::Play(const char* name)
@@ -141,6 +156,9 @@ void EmbeddedPlayer::Play(const char* name)
 
 void EmbeddedPlayer::PlayMusic()
 {
+    if (!g_musicTrack)
+        return;
+
     if (!MIX_TrackPlaying(g_musicTrack))
     {
         auto options = SDL_CreateProperties();
@@ -154,18 +172,18 @@ void EmbeddedPlayer::PlayMusic()
 
 void EmbeddedPlayer::FadeOutMusic()
 {
-    if (MIX_TrackPlaying(g_musicTrack))
+    if (g_musicTrack && MIX_TrackPlaying(g_musicTrack))
         MIX_StopTrack(g_musicTrack, MIX_TrackMSToFrames(g_musicTrack, 1000));
 }
 
 bool EmbeddedPlayer::IsPlayingSound()
 {
-    return std::any_of(g_soundTracks.begin(), g_soundTracks.end(), [](MIX_Track* track) { return MIX_TrackPlaying(track); });
+    return std::any_of(g_soundTracks.begin(), g_soundTracks.end(), [](MIX_Track* track) { return track && MIX_TrackPlaying(track); });
 }
 
 bool EmbeddedPlayer::IsPlayingMusic()
 {
-    return MIX_TrackPlaying(g_musicTrack);
+    return g_musicTrack && MIX_TrackPlaying(g_musicTrack);
 }
 
 void EmbeddedPlayer::Shutdown()

@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.28)
+project(ShadowUwpHostTools LANGUAGES C CXX)
+get_filename_component(shadow_root "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+add_subdirectory("${shadow_root}/tools/XShaderRecomp/thirdparty/zstd/build/cmake" zstd)
+add_subdirectory("${shadow_root}/tools/file_to_c" file_to_c)

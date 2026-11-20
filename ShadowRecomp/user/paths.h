@@ -1,5 +1,8 @@
 #pragma once
 
+#include <filesystem>
+#include <vector>
+
 #include <mod/mod_loader.h>
 
 #define USER_DIRECTORY "ShadowRecomp"
@@ -10,10 +13,14 @@
 
 extern std::filesystem::path g_executableRoot;
 
+#ifdef SHADOW_RECOMP_UWP
+std::filesystem::path GetGamePath();
+#else
 inline std::filesystem::path GetGamePath()
 {
     return GAME_INSTALL_DIRECTORY;
 }
+#endif
 
 bool CheckPortable();
 std::filesystem::path BuildUserPath();

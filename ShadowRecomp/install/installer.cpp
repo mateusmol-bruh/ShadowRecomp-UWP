@@ -135,7 +135,7 @@ namespace Installer
         return ComputeTotalSize({ GameFiles, GameFilesSize }, *sources.game, sources.totalSize, errorMessage);
     }
 
-    static bool CheckFiles(const VirtualFileSystem& source, const std::vector<FileEntry>& fileEntries, Journal* journal, const ProgressCallback& callback, std::string& errorMessage)
+    static bool CheckFiles(const VirtualFileSystem& source, std::span<const FileEntry> fileEntries, Journal* journal, const ProgressCallback& callback, std::string& errorMessage)
     {
         uint64_t totalSize = 0;
         for (const FileEntry& fileEntry : fileEntries)
@@ -290,4 +290,30 @@ namespace Installer
         std::vector<FileEntry> fileEntries;
         return MatchSourceFiles(*source, fileEntries, errorMessage) && CheckFiles(*source, fileEntries, nullptr, callback, errorMessage);
     }
+
+#ifdef SHADOW_RECOMP_UWP
+    bool CheckExtractedGame(const std::filesystem::path& gameDir, std::string& errorMessage)
+    {
+        auto source = DirectoryFileSystem::Create(gameDir);
+        if (!source)
+        {
+            errorMessage = "Unable to read the extracted disc folder.";
+            return false;
+        }
+
+        std::vector<FileEntry> files;
+        if (!MatchSourceFiles(*source, files, errorMessage))
+            return false;
+
+        const auto executable = std::find_if(files.begin(), files.end(),
+            [](const FileEntry& file) { return GameExecutableFile == file.path; });
+        if (executable == files.end())
+        {
+            errorMessage = "The game manifest does not contain default.xbe.";
+            return false;
+        }
+
+        return CheckFiles(*source, std::span(&*executable, 1), nullptr, [](const Progress&) {}, errorMessage);
+    }
+#endif
 }

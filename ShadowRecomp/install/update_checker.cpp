@@ -1,11 +1,17 @@
 #include "update_checker.h"
 
+#ifdef SHADOW_RECOMP_UWP
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Web.Http.h>
+#include <winrt/Windows.Web.Http.Headers.h>
+#else
 #include <curl/curl.h>
+#endif
 #include <nlohmann/json.hpp>
 
 #include "version.h"
 
-#ifdef WIN32
+#if defined(WIN32) && !defined(SHADOW_RECOMP_UWP)
 #include <shellapi.h>
 #endif
 
@@ -23,12 +29,14 @@ static std::atomic<bool> g_updateCheckerInProgress = false;
 static std::atomic<bool> g_updateCheckerFinished = false;
 static UpdateChecker::Result g_updateCheckerResult = UpdateChecker::Result::NotStarted;
 
-size_t updateCheckerWriteCallback(void *contents, size_t size, size_t nmemb, std::string *output)
+#ifndef SHADOW_RECOMP_UWP
+static size_t updateCheckerWriteCallback(void *contents, size_t size, size_t nmemb, std::string *output)
 {
     size_t totalSize = size * nmemb;
     output->append((char *)contents, totalSize);
     return totalSize;
 }
+#endif
 
 static bool parseVersion(const std::string &versionStr, int &major, int &minor, int &revision)
 {
@@ -61,20 +69,54 @@ static bool parseVersion(const std::string &versionStr, int &major, int &minor, 
     return true;
 }
 
-void updateCheckerThread()
+static bool downloadLatestRelease(std::string& response)
 {
-    CURL *curl = curl_easy_init();
-    CURLcode res;
-    int major, minor, revision;
-    std::string response;
+#ifdef SHADOW_RECOMP_UWP
+    try
+    {
+        struct Apartment
+        {
+            Apartment() { winrt::init_apartment(); }
+            ~Apartment() { winrt::uninit_apartment(); }
+        } apartment;
+
+        using winrt::Windows::Foundation::Uri;
+        winrt::Windows::Web::Http::HttpClient client;
+        client.DefaultRequestHeaders().UserAgent().ParseAdd(winrt::to_hstring(USER_AGENT));
+        response = winrt::to_string(client.GetStringAsync(Uri(winrt::to_hstring(CHECK_URL))).get());
+        return true;
+    }
+    catch (const winrt::hresult_error& error)
+    {
+        LOGF_ERROR("Error while performing request: {}", winrt::to_string(error.message()));
+        return false;
+    }
+#else
+    CURL* curl = curl_easy_init();
+    if (!curl)
+        return false;
+
     curl_easy_setopt(curl, CURLOPT_URL, CHECK_URL);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, updateCheckerWriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, USER_AGENT);
+    const auto result = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    if (result != CURLE_OK)
+    {
+        LOGF_ERROR("Error while performing request: {}", curl_easy_strerror(result));
+        return false;
+    }
+    return true;
+#endif
+}
 
-    res = curl_easy_perform(curl);
-    if (res == CURLE_OK)
+void updateCheckerThread()
+{
+    int major, minor, revision;
+    std::string response;
+    if (downloadLatestRelease(response))
     {
         try
         {
@@ -113,11 +155,8 @@ void updateCheckerThread()
     }
     else
     {
-        LOGF_ERROR("Error while performing request: {}", curl_easy_strerror(res));
         g_updateCheckerResult = UpdateChecker::Result::Failed;
     }
-
-    curl_easy_cleanup(curl);
 
     g_updateCheckerFinished = true;
     g_updateCheckerInProgress = false;
@@ -125,7 +164,9 @@ void updateCheckerThread()
 
 void UpdateChecker::initialize()
 {
+#ifndef SHADOW_RECOMP_UWP
     curl_global_init(CURL_GLOBAL_DEFAULT);
+#endif
 }
 
 bool UpdateChecker::start()
@@ -161,7 +202,9 @@ UpdateChecker::Result UpdateChecker::check()
 
 void UpdateChecker::visitWebsite()
 {
-#if defined(WIN32)
+#if defined(SHADOW_RECOMP_UWP)
+    SDL_OpenURL(VISIT_URL);
+#elif defined(WIN32)
     ShellExecuteA(0, 0, VISIT_URL, 0, 0, SW_SHOW);
 #elif defined(__linux__)
     std::string command = "xdg-open " + std::string(VISIT_URL) + " &";

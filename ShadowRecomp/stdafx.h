@@ -4,7 +4,11 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#ifdef SHADOW_RECOMP_UWP
+#include <mmreg.h>
+#else
 #include <ShlObj_core.h>
+#endif
 #include <wrl/client.h>
 
 using Microsoft::WRL::ComPtr;

@@ -14,11 +14,22 @@ constexpr uint32_t NV2A_APERTURE_SIZE = 0x01000000u;  // 16 MiB the real BAR0 si
 constexpr uint32_t MMIO_APERTURE_BASE = 0xFE800000u;
 constexpr uint32_t MMIO_APERTURE_SIZE = 0x00800000u;  // 8 MiB
 
+#ifdef SHADOW_RECOMP_UWP
+constexpr size_t UwpGuestHeapBegin = 0x016A1000ull;
+constexpr size_t UwpPhysicalHeapBegin = 0xA0000000ull;
+constexpr size_t UwpGuestHeapSize = 256ull * 1024 * 1024;
+constexpr size_t UwpPhysicalHeapSize = 256ull * 1024 * 1024;
+#endif
+
 struct Memory
 {
     uint8_t* base{};
 
+#ifdef SHADOW_RECOMP_UWP
+    void InitForGame();
+#else
     Memory();
+#endif
 
     bool IsInMemoryRange(const void* host) const noexcept
     {

@@ -2097,7 +2097,11 @@ static void DrawOptions(X86Context* ctx, ImVec2 minClipRect, ImVec2 maxClipRect,
 		DrawOption(ctx, rowCount++, &Config::BloomIntensity, true, min, max, nullptr);
 
 #ifdef SHADOW_RECOMP_D3D12
+#ifdef SHADOW_RECOMP_UWP
+        DrawOption(ctx, rowCount++, &Config::GraphicsAPI, false, min, max, cmnReason);
+#else
 		DrawOption(ctx, rowCount++, &Config::GraphicsAPI, !OptionsMenu::s_isPause, min, max, cmnReason);
+#endif
 #endif
 
 		break;

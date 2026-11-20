@@ -1,268 +1,99 @@
-<p align="center">
-    <img src="https://github.com/FoxWorkshop/ShadowRecompResources/blob/master/images/logo/logo.png?raw=true" width="1024"/>
-</p>
+# Shadow Recompiled UWP
 
-<h3 align="center">
-    Happy 21st Birthday, Shadow The Hedgehog
-</h3>
+Port não oficial de **Shadow Recompiled** para **Xbox Series X|S**, executado no Modo de Desenvolvedor. A versão 1.0.9.0 foi testada no console com o jogo em armazenamento externo, incluindo as abas **Opções** e **Conquistas** no menu de pausa.
 
-<p align="center">
-    <a href="https://github.com/FoxWorkshop/ShadowRecomp/releases/latest"><b>Download</b></a>
-    ·
-    <a href="#minimum-system-requirements"><b>Requirements</b></a>
-    ·
-    <a href="#features"><b>Features</b></a>
-    ·
-    <a href="#known-issues"><b>Known Issues</b></a>
-    ·
-    <a href="#controls"><b>Controls</b></a>
-    ·
-    <a href="#faq"><b>FAQ</b></a>
-    ·
-    <a href="#building"><b>Building</b></a>
-    ·
-    <a href="#credits"><b>Credits</b></a>
-</p>
+[Baixar a versão mais recente](https://github.com/mateusmol-bruh/ShadowRecomp-UWP/releases/latest) · [Instalar no Xbox](#instalar-no-xbox) · [Preparar o HD externo](#preparar-o-hd-externo) · [Compilar](#compilar)
 
----
+## O que você precisa
 
-Shadow Recompiled is an unofficial PC port of the original Xbox version of Shadow the Hedgehog (2005) created through the process of static recompilation.
-The port supports Windows and Linux.
+- Xbox Series X ou Series S com o Modo de Desenvolvedor ativado. [Como ativar o Modo de Desenvolvedor](https://learn.microsoft.com/pt-br/previous-versions/windows/uwp/xbox-apps/devkit-activation)
+- Um PC na mesma rede local do console para instalar o pacote pelo Xbox Device Portal.
+- Uma cópia do **Shadow the Hedgehog (2005) para o Xbox original**. Você pode usar o disco extraído com `default.xbe` e os demais arquivos, ou uma imagem ISO compatível.
+- Para jogar pelo USB, um HD, SSD ou pendrive em **NTFS** com acesso de gravação para apps do Xbox.
 
-**This project does not include any game assets. You must provide the files from your own legally acquired copy of the game to install or build Shadow Recompiled.**
+O pacote do port precisa dos arquivos da sua própria cópia do jogo. Mantenha o `default.xbe` junto dos demais arquivos do disco extraído.
 
-[XboxRecomp2] (previously [XboxRecomp](https://github.com/FoxWorkshop/XboxRecomp)) is the main recompiler used for converting the game's original x86 code into compatible C++. 
-The development of that recompiler was directly inspired by [XenonRecomp](https://github.com/hedge-dev/XenonRecomp), which was used to create [Sonic Unleashed Recompiled](https://github.com/hedge-dev/UnleashedRecomp).
+## Baixar os arquivos
 
-## Minimum System Requirements
+Na [página da versão](https://github.com/mateusmol-bruh/ShadowRecomp-UWP/releases/latest), abra **Assets** e baixe:
 
-- CPU: Sandy Bridge (2011) equivalent or newer
-- GPU with support for Direct3D 12.0 (Shader Model 6) or Vulkan 1.2
-    - Anything 2012+ for AMD/Nvidia and 2015+ for Intel
-- Operating System:
-    - Windows 10 (1909+)
-    - A modern Linux distro
-- Storage:
-    - 2.4 GiB required
+| Arquivo | Uso |
+| --- | --- |
+| `ShadowRecomp.UWP.x64.appx` | Pacote do aplicativo para instalar no Xbox. |
+| `Microsoft.VCLibs.x64.14.00.appx` | Dependência x64 da Microsoft. Selecione-a quando o portal pedir dependências. |
+| `ShadowRecomp-UWP.cer` | Certificado público da assinatura do pacote. Use-o se o portal solicitar o certificado. |
+| `storage.txt` | Seletor USB pronto para um dispositivo com o identificador `shadow-usb`. |
 
-## Features
+SDL3 e DirectX Shader Compiler já integram o APPX principal.
 
-### Easy to Use Installer
+## Preparar o HD externo
 
-A built-in installer will guide you through the game installation process, performing many integrity checks to ensure the process goes as smoothly as possible.
+1. No PC, crie a pasta **`shadow05`** na raiz da unidade NTFS. Nas propriedades de segurança dessa pasta, conceda **Modificar** a **Todos os Pacotes de Aplicativos** (`ALL APPLICATION PACKAGES`), incluindo arquivos e subpastas.
+2. Crie `shadow05/storage-id.txt` com uma única linha, por exemplo `shadow-usb`. Use até 64 letras ASCII, números, hífens ou sublinhados.
+3. Crie `shadow05/original/` e copie para lá o disco extraído inteiro. A raiz de `original/` deve conter `default.xbe` e as pastas do disco. Também é possível colocar o disco inteiro em uma subpasta imediata de `original/`.
+4. Conecte o HD ao Xbox. Se o console perguntar como usar a unidade, escolha **Mídia**.
 
-### Options Menu
+```text
+X:/
+└── shadow05/
+    ├── storage-id.txt
+    ├── original/
+    │   ├── default.xbe
+    │   ├── common/
+    │   ├── sound/
+    │   └── demais arquivos e pastas do disco
+    ├── save/
+    └── mods/
+```
 
-A new options menu for PC has been added, replacing the game's original settings. 
-Get access to many quality of life features and graphics options directly in-game with navigation that is fully compatible with a controller.
+O app cria `save/` e `mods/` no armazenamento selecionado. Você pode preparar a pasta e aplicar as permissões pelo PowerShell no PC. Substitua `X:` pela letra real do seu HD.
 
-### Widescreen and Ultrawide Support
+```powershell
+New-Item -ItemType Directory -Path 'X:\shadow05\original' -Force
+icacls 'X:\shadow05' /grant '*S-1-15-2-1:(OI)(CI)M' /T
+Set-Content -Encoding ascii -LiteralPath 'X:\shadow05\storage-id.txt' -Value 'shadow-usb'
+```
 
-Aspect ratios for 16:9 and 16:10, as well as ultrawide displays (such as 21:9 or even wider) are supported with options to adjust the alignment of the UI.
+Para usar uma **ISO**, copie a imagem para `shadow05/original/` e siga o assistente ao abrir o app. Ele extrai os dados para `shadow05/game/`, que exige espaço adicional. O disco extraído pode ser aberto diretamente após a verificação.
 
-### High Frame Rate Support
+## Instalar no Xbox
 
-Support for high frame rate has been added as an available option. Many glitches that normally occur at higher frame rates have been fixed and are included as part of the recompilation.
-Cutscenes have also an option to play at unlocked frame rate.
+1. No Xbox em Modo de Desenvolvedor, abra o **Dev Home**. Em **Remote Access Settings**, habilite o **Xbox Device Portal** e abra no navegador do PC o endereço exibido no console.
+2. Na aba **Home** do portal, use **Add** em **My games & apps** e selecione `ShadowRecomp.UWP.x64.appx`.
+3. Na etapa de dependências, adicione `Microsoft.VCLibs.x64.14.00.appx`. Se a interface pedir um certificado, selecione `ShadowRecomp-UWP.cer`. Conclua a instalação.
+4. Abra **Shadow Recompiled** pelo Dev Home com o HD conectado. Com um único USB preparado e sem instalação interna anterior, o app seleciona a pasta `shadow05` automaticamente.
+5. Para escolher um HD específico ou migrar de uma instalação interna, feche o app e envie `storage.txt` pelo **File Explorer → LocalAppData → Shadow Recompiled → LocalState** do portal. O arquivo deve conter `usb:shadow-usb`. Substitua `shadow-usb` pelo conteúdo de `storage-id.txt` se escolheu outro identificador. Abra o jogo novamente.
 
-### Enhancements
+[Implantação manual de APPX no Xbox](https://learn.microsoft.com/en-us/windows/uwp/apps-for-xbox/development-options) · [Explorador de arquivos do Device Portal](https://learn.microsoft.com/en-us/windows/uwp/debug-test-perf/device-portal-api-core#app-file-explorer)
 
-Extra care and attention was taken to make the experience the best as possible:
-- Bloom has been overhauled to fixes many issues such as not covering the whole screen, bottom artifacts, and extra dark band / box blending on the screen.
-- Sound effect limits are expanded to fix sound cutting off in areas with many sound effects.
-- Edge artifacts that are in every version of the game has been completely fixed.
-- Shadow's shoes have been patched to restore the use of 4 Jet Effects instead of 3.
-- Cutscenes can always be skipped even if you never watched them before.
-- Player 2 can now properly control the Partner on the screen like on the others versions of the game.
-- Animated textures which normally have a chance to not work in every version of the game have been fixed.
-- Space Gadget's gravity system has been updated to fix wrong rotation issues, fixing the infamous inverted Spin Dash, slide, and landing flip bugs.
-- Many audio issues exclusive to the Xbox port have been fixed (distance, loop etc.).
-- Various minor graphics glitches like transparency issues and the Xbox exclusive 'white flash' on object load-in have been fixed.
+## Saves, mods e armazenamento interno
 
-other fixes:
-- Drop shadows vanishing during laser lock-on (e.g. 4SHOT, 8SHOT, Satellite Laser).
-- AirSaucer Effect Speed Multiplying by Number of Saucers
--  Rails applying velocity on detach incorrectly
--  Fixed Black Hawk softlock at end of some paths (e.g. Cryptic Castle)
--  Black Tank invincible while waiting for the player
--  Ball Switches ignoring melee hits
+| Caminho no armazenamento selecionado | O que fica nele |
+| --- | --- |
+| `original/` | Disco extraído ou ISO da sua cópia. |
+| `game/` | Instalação gerada pelo assistente, quando usada. |
+| `save/` | Saves e progresso do jogo. |
+| `mods/` | Mods e perfis. Para importar um perfil do SA Mod Manager, inclua `.modloader/profiles/`. |
+| `cache/` | Cache de renderização. |
 
-### Achievements
+O aplicativo, o `config.toml`, o seletor `storage.txt` e o log `startup.log` ficam no console. Para usar o armazenamento interno, envie um `storage.txt` com o conteúdo `local` e coloque a mídia em `LocalState/original/`. O app usa uma instalação existente em `game/` antes de tentar iniciar pelo disco extraído.
 
-Achievements have been implemented to the game, they can be checked from the pause menu; a full new menu has been added.
+Para migrar com o aplicativo fechado, copie `original/`, `game/`, `save/` e `mods/` do `LocalState` para o `shadow05/` do HD, conforme as pastas que existirem. Ajuste o seletor, abra o jogo e confirme se seu save aparece. Para abrir o assistente manualmente, crie o arquivo vazio `install.txt` em `LocalState` e abra o app.
 
-You will be rewarded with achievements as you progress through the game. 
+## Atualizar e solucionar problemas
 
-> [!NOTE]
-Achievements cannot be used with platforms such as Steam or RetroAchievements.
+Para atualizar, feche o jogo e instale o APPX novo sobre a versão existente pelo Xbox Device Portal. Use o mesmo HD com a estrutura `shadow05`. A atualização usa o mesmo identificador de pacote e certificado da versão anterior de teste.
 
-### Mod Support
+- **O app abriu o instalador.** Confira se `default.xbe` está junto dos demais arquivos extraídos em `shadow05/original/` e veja se o log contém `Media: verified extracted disc. Launching in place.`.
+- **O HD não foi selecionado.** Confira as permissões, o conteúdo de `storage-id.txt` e o seletor `storage.txt` no console. Cada unidade preparada deve ter um identificador distinto.
+- **Tela preta ou retorno à Dashboard.** Baixe `startup.log` em **File Explorer → LocalAppData → Shadow Recompiled → LocalState** antes de abrir o jogo de novo. Ao relatar o problema, informe a versão, o modelo do Xbox, a etapa em que ocorreu e anexe o log. Compartilhe o log sem arquivos da mídia original nem dados pessoais.
 
-The game includes a mod loader compatible with [SA Mod Manager](https://github.com/X-Hax/SA-Mod-Manager).
+## Compilar
 
-The mod format uses the same standard as the one used by Sonic Adventure mods. 
+O [guia de compilação UWP](docs/BUILDING-UWP.md#compilar-e-empacotar) lista o Windows SDK, o LLVM e o comando para gerar e assinar o pacote. A compilação usa o `default.xbe` da sua própria cópia.
 
-> [!NOTE]
-Code modding is currently not possible and is planned for a future update. As a workaround for the time being, some codes have been directly embedded into the game and can be accessed through SA Mod Manager's Codes tab.
+## Créditos e licenças
 
-## Known Issues
+O código do port está sob a [GNU GPL v3](LICENSE). A adaptação parte do [ShadowRecomp de FoxWorkshop](https://github.com/FoxWorkshop/ShadowRecomp) e usa [UnleashedRecomp-uwp](https://github.com/YTReviveMe/UnleashedRecomp-uwp) como referência para a integração com o Xbox. A [documentação original](https://github.com/FoxWorkshop/ShadowRecomp/blob/d2be1d4105a83853a3bf1954d3eac2047912d87e/README.md) cobre as versões para Windows e Linux e os créditos do projeto de base.
 
-Before reporting any issues, check if they are listed [here](https://github.com/FoxWorkshop/ShadowRecomp/issues).
-
-## Controls
-
-Default keyboard controls:
-
-- Loosely based on Dolphin Emulator's default keyboard layout
-    - Adapted to the Xbox controller
-- Remap them in the in-game options, or in `config.toml`
-
-![Keymap](docs/assets/controls-xbox.webp)
-
-| Hotkey    | Action                          |
-| --------- | ------------------------------- |
-| Alt+Enter | Toggle fullscreen/windowed mode |
-| Ctrl+1    | Keyboard controls port 1        |
-| Ctrl+2    | Keyboard controls port 2        |
-| Ctrl+3    | Keyboard controls port 3        |
-| Ctrl+4    | Keyboard controls port 4        |
-| F1        | Toggle profiler                 |
-| F8        | Toggle HUD                      |
-
-## FAQ
-
-### Do you have a website?
-
-Shadow Recompiled does not have an official website.
-
-**Please link here when directing anyone to the project.**
-
-> [!CAUTION]
-> Do not download builds of Shadow Recompiled from anywhere but our [Releases](https://github.com/FoxWorkshop/ShadowRecomp/releases/latest) page.
->
-> **We will never distribute builds on other websites, via Discord servers or via third-party update tools.**
-
-### Can I install the game using a GameCube / PlayStation 2 version?
-
-**You cannot use the files from the GameCube or PlayStation 2 version of the game.**  
-Supporting these files would require an entirely new recompilation to handle all the differences.
-
-### Where are save data & configs?
-
-- Windows: `%APPDATA%\ShadowRecomp\`
-- Linux: `~/.config/ShadowRecomp/`
-
-Inside, saves are in `save/` and settings in `config.toml`.
-
-You can also create `portable.txt` beside the `.exe` to keep everything in
-your game folder.
-
-### How do I update?
-
-Copy the files from a new [release][all releases] over your existing install.
-
-- Saves and settings are kept
-- Reinstall not needed afterwards. Just boot the game
-
-### How do I run the installer again?
-
-Launch the game with `--install`.
-In a console/terminal window.
-
-You'll only need this if you changed the game files; and
-want to revert to a stock setup.
-
-### Why does some of the UI have visible lines or gaps?
-
-This is a vanilla game issue.
-Higher resolutions unfortunately make this issue easier to see.
-
-- Please don't open an issue for it.
-- To fix it, use HD GUI mod(s).
-
-### Why are some sound effects missing
-
-The Xbox version of the game has several missing sound effects.
-See [details here][issue 44] if interested.
-
-You will need to use a SFX Restoration mod to fix these defects.
-
-### What other platforms will be supported?
-
-We only have Windows + Linux machines.  
-We'd happily accept community contribution for macOS.  
-
-But folks who want to support platforms that require more significant modifications 
-(e.g. touchscreen on mobile); should make a fork.
-
-## Known Issues
-
-Before reporting any issues, check if they are listed [here][issues].
-
-## Building
-
-[Check out the building instructions here][BUILDING.md].
-
-## Credits
-
-### Shadow Recompiled
-
-- [Sora](https://github.com/Sora-yx): Creator and Lead Developer of the recompilation, as well as the developer of technologies created for it such as [XboxRecomp](https://github.com/FoxWorkshop/XboxRecomp) (before the XboxRecomp2 switch) and [XShaderRecomp](https://github.com/FoxWorkshop/XShaderRecomp). Provided French localization for the custom menus. Final design decisions and UI for installer, achievements, and other custom menus.
-
-- [dreamsyntax](https://github.com/dreamsyntax): Second Developer, source for Shadow knowledge, ensuring port accuracy, and identifying flaws with the Xbox port of the game. Provided English localization for the custom menus.
-
-- [Sewer56](https://github.com/Sewer56): Third Developer. Added nix support, Discord RPC, implemented better widescreen, better framepacing and >4x'd performance with shaders and [XboxRecomp2].
-
-- [TheHatedGravity](https://github.com/TheHatedGravity): First installer design, UI polish, spotting visual flaws
-
-- [DonutStopGaming](https://github.com/DonutStopGaming): Help with understanding RenderWare and finding Shadow functions.
-
-- [Jesus_PK](https://github.com/Jesus-PK): Provided Spanish localization for the custom menus, also helped testing and finding bugs.
-
-- [Deep-Sea Berry](https://github.com/Deep-SeaBerry): Artist behind the project logo, along with custom options icons. Provided German localization for the custom menus and helped testing and finding bugs.
-
-- [Emasplatter](https://twitter.com/emasplatter): Provided Italian localization for the custom menus.
-
-- [Windii](https://www.youtube.com/@WindiiGitlord/videos): Provided Japanese localization for the custom menus.
-
-- [Kondrashov's Lair](https://www.youtube.com/channel/UCUU-r-7kVY3ig-GY7KTFvlw): Produced the installer music (original prod. by Sins Of A Divine Mother).
-
-### Tester Thanks
-- [Rawlins]
-- [DarkShadow17]
-- [The Spectral Star]
-- [Pixel The Retro]
-- [ultra0000]
-- Many others who helped briefly test
-
-### Special Thanks
-
-- CXBX-Reloaded Development Team: This project would not have been possible without the [CXBX emulator](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded-legacy). Nearly every aspect of the development was guided by referencing CXBX's research on the original Xbox, especially the graphics part.
-
-- [extract-xiso](https://github.com/XboxDev/extract-xiso): extract-xiso devs (in@fishtank.com and other extract-xiso contributors) for core extraction in the installer.
-
-- Unleashed Recompiled Development Team: Created much of the ground work that made all of this possible and sped up development time considerably.
-
-- [Marathon Recompiled](https://github.com/sonicnext-dev/MarathonRecomp): Used as a reference for various features and help with debugging.
-
-- [Skyth](https://github.com/blueskythlikesclouds): Provided help to understand how Recompilation works, also the author of the original graphics pipeline code which was (mostly) reused here.
-
-- [Darío](https://github.com/DarioSamo): Creator of the graphics hardware abstraction layer [plume](https://github.com/renderbag/plume), used by the project's graphics backend.
-
-- [MattKC](https://github.com/itsmattkc): Useful explanation of Xbox's Push Buffers system on [his blog with Reburn3.](https://forum.mattkc.com/viewtopic.php?t=154)
-
-- [ocornut](https://github.com/ocornut): Creator of Dear ImGui, which is used as the backbone of the custom menus.
-
-
-[issues]: https://github.com/FoxWorkshop/ShadowRecomp/issues
-[all releases]: https://github.com/FoxWorkshop/ShadowRecomp/releases
-[issue 44]: https://github.com/FoxWorkshop/ShadowRecomp/issues/44
-[BUILDING.md]: /docs/BUILDING.md
-[XboxRecomp2]: https://sewer56.dev/XboxRecomp2
-[ultra0000]: https://github.com/ultra0000
-[Rawlins]: https://www.youtube.com/channel/UCjbUqRzVay-6HjoJjODre5w
-[DarkShadow17]: https://www.youtube.com/@DarkShadowtH
-[The Spectral Star]: https://www.youtube.com/@the-spectral-star5086
-[Marathon Recompiled]: https://github.com/sonicnext-dev/MarathonRecomp
-[Pixel The Retro]: https://www.youtube.com/@PixelTheRetro
-[Unleashed Recompiled]: https://github.com/hedge-dev/UnleashedRecomp
+Consulte os [avisos de terceiros](docs/THIRD-PARTY-UWP.md) para as dependências do pacote. Shadow the Hedgehog é da SEGA.

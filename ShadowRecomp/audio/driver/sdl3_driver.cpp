@@ -15,6 +15,9 @@
 #include <ui/game_window.h>
 #include <patches/global.h>
 #include <os/media.h>
+#ifdef SHADOW_RECOMP_UWP
+#include <os/uwp/platform.h>
+#endif
 
 // Memo: 
 // Two way of using buffers: Static (sfx, voices - Buffer is filled once with complete audio, Pull just read the buffer) 
@@ -1241,9 +1244,15 @@ SHTHR_SOUNDDEVICE_Impl::SHTHR_SOUNDDEVICE_Impl()
 	SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_NAME_STRING, "Shadow Recompiled");
 	SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "512"); // necessary for weapon SFX timing (SDL default is 1024)
 
+#ifdef SHADOW_RECOMP_UWP
+	Uwp::LogStartup("Game audio: initializing SDL audio.");
+#endif
 	if (!SDL_InitSubSystem(SDL_INIT_AUDIO))
 	{
 		LOGFN_ERROR("Failed to init audio subsystem: {}", SDL_GetError());
+#ifdef SHADOW_RECOMP_UWP
+		Uwp::LogStartup(fmt::format("Game audio: SDL initialization failed: {}", SDL_GetError()));
+#endif
 		return;
 	}
 
@@ -1260,6 +1269,16 @@ SHTHR_SOUNDDEVICE_Impl::SHTHR_SOUNDDEVICE_Impl()
 	{
 		SDL_ResumeAudioStreamDevice(mDeviceStream);
 		LOGN_UTILITY("Initialized SDL3 Audio");
+#ifdef SHADOW_RECOMP_UWP
+		Uwp::LogStartup("Game audio: output opened.");
+#endif
+	}
+	else
+	{
+		LOGFN_ERROR("Failed to open audio output: {}", SDL_GetError());
+#ifdef SHADOW_RECOMP_UWP
+		Uwp::LogStartup(fmt::format("Game audio: output unavailable: {}", SDL_GetError()));
+#endif
 	}
 }
 

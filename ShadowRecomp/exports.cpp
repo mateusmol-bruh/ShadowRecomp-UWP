@@ -33,11 +33,11 @@ static const std::unordered_map<std::string_view, GameSoundID> g_GameSoundMap =
 
 void Game_PlaySound(X86Context* ctx, const char* pName)
 {
-    if (EmbeddedPlayer::s_isActive || EmbeddedPlayer::s_isActive && IsndSeInstance == 0)
+    if (EmbeddedPlayer::s_isActive)
     {
         EmbeddedPlayer::Play(pName);
     }
-    else
+    else if (ctx)
     {
         auto it = g_GameSoundMap.find(pName); // example of game using play sound: 0x292DAC
         if (it != g_GameSoundMap.end())

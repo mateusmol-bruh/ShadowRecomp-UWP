@@ -47,15 +47,15 @@ typedef enum _D3DFORMAT
 	D3DFMT_V16U16 = 64,
 	D3DFMT_A2W10V10U10 = 67,
 
-	D3DFMT_UYVY = MAKEFOURCC('U', 'Y', 'V', 'Y'),
-	D3DFMT_R8G8_B8G8 = MAKEFOURCC('R', 'G', 'B', 'G'),
-	D3DFMT_YUY2 = MAKEFOURCC('Y', 'U', 'Y', '2'),
-	D3DFMT_G8R8_G8B8 = MAKEFOURCC('G', 'R', 'G', 'B'),
-	D3DFMT_DXT1 = MAKEFOURCC('D', 'X', 'T', '1'),
-	D3DFMT_DXT2 = MAKEFOURCC('D', 'X', 'T', '2'),
-	D3DFMT_DXT3 = MAKEFOURCC('D', 'X', 'T', '3'),
-	D3DFMT_DXT4 = MAKEFOURCC('D', 'X', 'T', '4'),
-	D3DFMT_DXT5 = MAKEFOURCC('D', 'X', 'T', '5'),
+	D3DFMT_UYVY = SDL_FOURCC('U', 'Y', 'V', 'Y'),
+	D3DFMT_R8G8_B8G8 = SDL_FOURCC('R', 'G', 'B', 'G'),
+	D3DFMT_YUY2 = SDL_FOURCC('Y', 'U', 'Y', '2'),
+	D3DFMT_G8R8_G8B8 = SDL_FOURCC('G', 'R', 'G', 'B'),
+	D3DFMT_DXT1 = SDL_FOURCC('D', 'X', 'T', '1'),
+	D3DFMT_DXT2 = SDL_FOURCC('D', 'X', 'T', '2'),
+	D3DFMT_DXT3 = SDL_FOURCC('D', 'X', 'T', '3'),
+	D3DFMT_DXT4 = SDL_FOURCC('D', 'X', 'T', '4'),
+	D3DFMT_DXT5 = SDL_FOURCC('D', 'X', 'T', '5'),
 
 	D3DFMT_D16_LOCKABLE = 70,
 	D3DFMT_D32 = 71,
@@ -86,7 +86,7 @@ typedef enum _D3DFORMAT
 
 	D3DFMT_Q16W16V16U16 = 110,
 
-	D3DFMT_MULTI2_ARGB8 = MAKEFOURCC('M', 'E', 'T', '1'),
+	D3DFMT_MULTI2_ARGB8 = SDL_FOURCC('M', 'E', 'T', '1'),
 
 	// Floating point surface formats
 

@@ -4,6 +4,42 @@
 #include "function.h"
 #include "x86_context.h"
 
+#ifdef SHADOW_RECOMP_UWP
+#include <os/uwp/platform.h>
+
+void Memory::InitForGame()
+{
+    // Reserve the 32-bit address space only when launching the installed game.
+    base = static_cast<uint8_t*>(VirtualAllocFromApp(nullptr, X86_MEMORY_SIZE, MEM_RESERVE, PAGE_NOACCESS));
+    if (!base)
+    {
+        Uwp::LogStartup(fmt::format("Memory: guest address reservation failed (Win32 {}).", GetLastError()));
+        return;
+    }
+
+    const auto commit = [this](size_t offset, size_t size)
+    {
+        return VirtualAllocFromApp(base + offset, size, MEM_COMMIT, PAGE_READWRITE) != nullptr;
+    };
+
+    constexpr size_t nullPageSize = 4096;
+    // The XBE's small-block allocator at 0x425F6A uses the fixed page below 0x80001000.
+    constexpr size_t xbeSmallBlockPool = 0x80000000;
+    constexpr size_t xbeSmallBlockPoolSize = 0x1000;
+    static_assert(X86_IMAGE_BASE + X86_IMAGE_SIZE + X86_CODE_SIZE * 2ull <= UwpGuestHeapBegin);
+    if (!commit(nullPageSize, UwpGuestHeapBegin + UwpGuestHeapSize - nullPageSize)
+        || !commit(xbeSmallBlockPool, xbeSmallBlockPoolSize)
+        || !commit(UwpPhysicalHeapBegin, UwpPhysicalHeapSize)
+        || !commit(NV2A_APERTURE_BASE, NV2A_APERTURE_SIZE)
+        || !commit(MMIO_APERTURE_BASE, MMIO_APERTURE_SIZE))
+    {
+        const DWORD error = GetLastError();
+        VirtualFree(base, 0, MEM_RELEASE);
+        base = nullptr;
+        Uwp::LogStartup(fmt::format("Memory: guest commit failed (Win32 {}).", error));
+        return;
+    }
+#else
 Memory::Memory()
 {
 #ifdef _WIN32
@@ -47,6 +83,7 @@ Memory::Memory()
 		base = (uint8_t*)mmap(NULL, X86_MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
 
 	mprotect(base, 4096, PROT_NONE);
+#endif
 #endif
 
 

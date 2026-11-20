@@ -7,6 +7,9 @@
 #include "x86_context.h"
 #include <kernel/types.h>
 #include <os/logger.h>
+#ifdef SHADOW_RECOMP_UWP
+#include <os/uwp/platform.h>
+#endif
 #include <cstring>
 #ifdef _WIN32
 #include <windows.h>
@@ -44,7 +47,7 @@ constexpr size_t STACK_SIZE = 0x10000;
 constexpr size_t FX_SAVE_AREA_SIZE = sizeof(FX_SAVE_AREA);
 constexpr size_t KSTART_SWITCH_FRAME_SIZE = 24;
 
-bool isHostThread = false;
+thread_local bool isHostThread = false;
 
 std::string GetThreadName(uint32_t func)
 {
@@ -153,26 +156,18 @@ GuestThreadContext::GuestThreadContext(GuestThreadParams params)
 	*(uint32_t*)(NewPcr + 0x28) = g_memory.MapVirtual(Prcb);
 
 
-	if (eThread->Tcb.TlsData) 
+	if (m_TLS)
 	{
-		auto newPtr = g_memory.Translate(eThread->Tcb.TlsData);
-		uint32_t RawTlsDataSize = m_TLS->dwDataEndAddr - m_TLS->dwDataStartAddr;
-		uint32_t TlsSizeTotal = RawTlsDataSize + m_TLS->dwSizeofZeroFill;
-
-		uint32_t* TlsData = reinterpret_cast<xbox::addr_xt*>(newPtr);
-		
-		*TlsData = (uint32_t)((uintptr_t)newPtr + sizeof(uint32_t));
-		// Set the actual tls data from xbe.
-		TlsData += 1;
-		std::memcpy(TlsData, reinterpret_cast<xbox::PVOID>(m_TLS->dwDataStartAddr), RawTlsDataSize);
-
-		if (m_TLS->dwSizeofZeroFill) {
-			std::memset(reinterpret_cast<xbox::PBYTE>(TlsData) + RawTlsDataSize, 0, m_TLS->dwSizeofZeroFill);
-		}
+		auto* tlsData = reinterpret_cast<uint32_t*>(tls_region);
+		*tlsData++ = eThread->Tcb.TlsData + sizeof(uint32_t);
+		const uint32_t rawSize = m_TLS->dwDataEndAddr - m_TLS->dwDataStartAddr;
+		if (rawSize)
+			std::memcpy(tlsData, g_memory.Translate(m_TLS->dwDataStartAddr), rawSize);
+		// The TLS zero-fill area was cleared with the rest of the allocation.
 	}
 
 
-	if (isHostThread == false)
+	if (!isHostThread && m_TLS)
 	{
 		/**printf("StackBase: 0x%08X, StackLimit: 0x%08X, StackSize: 0x%08X  NtTibStackBase: 0x%08X,  TlsData: 0x%08X\n",
 			eThread->Tcb.StackBase, eThread->Tcb.StackLimit, eThread->Tcb.StackBase - eThread->Tcb.StackLimit,  AdjustedStackBase, eThread->Tcb.TlsData);*/
@@ -187,16 +182,10 @@ GuestThreadContext::GuestThreadContext(GuestThreadParams params)
 
 	memset(&x86Context, 0, sizeof(x86Context));
 
-	if (isHostThread)
-	{
-		//x86Context.esp.u32 = Thread->KernelStack;
-		x86Context.ebp.u32 = 0;
-	}
-	else
-	{
-		x86Context.esp.u32 = EspAddr; // eThread->Tcb.StackBase & 15;
-		x86Context.ebp.u32 = x86Context.esp.u32;
-	}
+	// Recompiled instructions use the guest stack even on the host UI thread.
+	x86Context.esp.u32 = EspAddr;
+	if (!isHostThread)
+		x86Context.ebp.u32 = EspAddr;
 
 
 	// Default flags (Interrupts enabled)
@@ -319,6 +308,9 @@ uint32_t GuestThread::Start(const GuestThreadParams& params)
 
 	//const auto procMask = (uint8_t)(params.flags >> 24);
 	g_currentThreadEntry = params.function;
+#ifdef SHADOW_RECOMP_UWP
+	const bool isBootstrap = isHostThread;
+#endif
 	GuestThreadContext ctx(params);
 
 	//ctx.x86Context.esp.u32 = (ctx.x86Context.esp.u32 - 16) & ~0xF;
@@ -329,6 +321,11 @@ uint32_t GuestThread::Start(const GuestThreadParams& params)
 		X86_STORE_U32(ctx.x86Context.esp.u32, params.parameter);
 
 	ctx.x86Context.esp.u32 -= 4; //in x86, the CPU always adjust the stack pointer by 4 bytes before calling a function
+#ifdef SHADOW_RECOMP_UWP
+	if (isBootstrap)
+		Uwp::LogStartup(fmt::format("Game thread: entering XBE at 0x{:08X} with initial ESP 0x{:08X}.",
+			params.function, ctx.x86Context.esp.u32));
+#endif
 	g_memory.FindFunction(params.function)(ctx.x86Context, g_memory.base); 	//call function, if it crashes there the function was most likely not found in the map array
 	return ctx.x86Context.eax.u32;
 }
