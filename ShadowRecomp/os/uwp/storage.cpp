@@ -50,14 +50,59 @@ static bool IsStorageId(std::string_view id)
     return !id.empty() && id.size() <= 64 && id.find_first_not_of(characters) == std::string_view::npos;
 }
 
-static void CheckWritableStorage(const fs::path& root)
+static fs::path MakeStorageTempPath(const fs::path& root, const wchar_t* prefix)
 {
     GUID guid{};
     wchar_t suffix[39]{};
     if (FAILED(CoCreateGuid(&guid)) || !StringFromGUID2(guid, suffix, ARRAYSIZE(suffix)))
-        throw std::runtime_error("Could not create a USB write check.");
+        throw std::runtime_error("Could not create a temporary storage filename.");
 
-    const auto probe = root / (std::wstring(L".write-check-") + suffix);
+    return root / (std::wstring(prefix) + suffix);
+}
+
+static void UpdateStorageSetting(const fs::path& settings, std::string_view previous, const std::string& value)
+{
+    if (previous == value)
+        return;
+
+    const auto temporary = MakeStorageTempPath(settings.parent_path(), L".storage-");
+    const auto line = value + '\n';
+    const auto size = static_cast<DWORD>(line.size());
+    const HANDLE file = CreateFileFromAppW(temporary.c_str(), GENERIC_WRITE, 0,
+        nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        const auto error = GetLastError();
+        Uwp::LogStartup("Storage: could not create a temporary file for LocalState/storage.txt (" + std::to_string(error) + ").");
+        return;
+    }
+
+    DWORD bytesWritten = 0;
+    const auto result = WriteFile(file, line.data(), size, &bytesWritten, nullptr);
+    DWORD error = result ? ERROR_SUCCESS : GetLastError();
+    CloseHandle(file);
+    if (result && bytesWritten != size)
+        error = ERROR_WRITE_FAULT;
+
+    if (error == ERROR_SUCCESS && !ReplaceFileFromAppW(settings.c_str(), temporary.c_str(), nullptr, 0, nullptr, nullptr))
+    {
+        error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND)
+            error = MoveFileFromAppW(temporary.c_str(), settings.c_str()) ? ERROR_SUCCESS : GetLastError();
+    }
+
+    if (error == ERROR_SUCCESS)
+        Uwp::LogStartup("Storage: updated LocalState/storage.txt to " + value + ".");
+    else
+    {
+        DeleteFileFromAppW(temporary.c_str());
+        Uwp::LogStartup("Storage: could not update LocalState/storage.txt (" + std::to_string(error) + ").");
+    }
+}
+
+static void CheckWritableStorage(const fs::path& root)
+{
+    const auto probe = MakeStorageTempPath(root, L".write-check-");
     const HANDLE file = CreateFileFromAppW(probe.c_str(), GENERIC_WRITE | DELETE, 0,
         nullptr, CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
     if (file == INVALID_HANDLE_VALUE)
@@ -74,31 +119,19 @@ static void CheckWritableStorage(const fs::path& root)
 fs::path Uwp::ResolveDataPath(const fs::path& localState)
 {
     const auto settings = localState / "storage.txt";
-    const bool automatic = !fs::exists(settings);
-    const auto choice = automatic ? std::string() : ReadStorageSetting(settings);
-    if (choice == "local")
-    {
-        LogStartup("Storage: LocalState selected by storage.txt.");
-        return localState;
-    }
-
-    if (automatic && fs::is_regular_file(localState / "game" / "default.xbe"))
-    {
-        LogStartup("Storage: keeping the existing LocalState installation.");
-        return localState;
-    }
-
+    const auto choice = ReadStorageSetting(settings);
     constexpr std::string_view prefix = "usb:";
-    if (!automatic && (!choice.starts_with(prefix) || !IsStorageId(std::string_view(choice).substr(prefix.size()))))
-        throw std::runtime_error("Invalid LocalState/storage.txt. Use local or usb:<storage-id>.");
-
-    const auto id = automatic ? std::string_view() : std::string_view(choice).substr(prefix.size());
-    LogStartup(automatic ? "Storage: looking for a prepared shadow05 folder." : "Storage: looking for " + choice);
+    LogStartup("Storage: looking for a prepared shadow05 folder.");
     const DWORD driveMask = GetLogicalDrives();
     if (!driveMask)
         throw std::runtime_error("Windows could not enumerate storage volumes.");
 
-    fs::path selected;
+    struct PreparedStorage
+    {
+        fs::path root;
+        std::string id;
+    };
+    std::vector<PreparedStorage> candidates;
     std::wstring volume = L"A:\\";
     // USB HDDs and SSDs can report DRIVE_FIXED. Identify prepared folders by their marker.
     for (unsigned index = 0; index < 26; ++index)
@@ -114,35 +147,36 @@ fs::path Uwp::ResolveDataPath(const fs::path& localState)
         const auto candidate = fs::path(volume) / "shadow05";
         LogStartup(std::string("Storage: checking ") + static_cast<char>(volume[0]) + ":\\shadow05.");
         const auto candidateId = ReadStorageSetting(candidate / "storage-id.txt");
-        if (!IsStorageId(candidateId) || (!automatic && candidateId != id))
-            continue;
-
-        if (!selected.empty())
-        {
-            if (automatic)
-                throw std::runtime_error("Multiple shadow05 folders found. Choose a unique usb:<storage-id> in LocalState/storage.txt.");
-            throw std::runtime_error("Two connected drives have the same ShadowRecomp USB storage ID. Disconnect one and reopen the app.");
-        }
-
-        selected = candidate;
+        if (IsStorageId(candidateId))
+            candidates.push_back({ candidate, candidateId });
     }
 
-    if (selected.empty())
+    if (candidates.empty())
     {
-        if (automatic)
-        {
-            LogStartup("Storage: no prepared USB folder found. Using LocalState.");
-            return localState;
-        }
-        throw std::runtime_error("USB folder shadow05 not found. Reconnect the selected drive and check shadow05/storage-id.txt and read permissions.");
+        UpdateStorageSetting(settings, choice, "local");
+        LogStartup("Storage: no prepared USB folder found. Using LocalState.");
+        return localState;
     }
 
-    LogStartup("Storage: found " + selected.string() + ". Checking write permission.");
-    CheckWritableStorage(selected);
-    const auto saves = selected / "save";
+    auto selected = candidates.begin();
+    if (candidates.size() > 1)
+    {
+        // The previous selection can disambiguate drives with distinct marker IDs.
+        const auto id = choice.starts_with(prefix) ? std::string_view(choice).substr(prefix.size()) : std::string_view{};
+        selected = std::ranges::find(candidates, id, &PreparedStorage::id);
+        if (selected == candidates.end())
+            throw std::runtime_error("Multiple shadow05 folders found. Disconnect the extra drives or choose a unique usb:<storage-id> in LocalState/storage.txt.");
+        if (std::ranges::find(std::next(selected), candidates.end(), id, &PreparedStorage::id) != candidates.end())
+            throw std::runtime_error("Two connected drives have the same ShadowRecomp USB storage ID. Disconnect one and reopen the app.");
+    }
+
+    LogStartup("Storage: found " + selected->root.string() + ". Checking write permission.");
+    CheckWritableStorage(selected->root);
+    const auto saves = selected->root / "save";
     if (fs::is_directory(saves))
         CheckWritableStorage(saves);
-    return selected;
+    UpdateStorageSetting(settings, choice, std::string(prefix) + selected->id);
+    return selected->root;
 }
 
 void Uwp::InitializeStorage()

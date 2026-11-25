@@ -3,7 +3,7 @@
 param(
     [string]$CertificatePath,
     [System.Security.SecureString]$CertificatePassword,
-    [version]$PackageVersion = "1.0.9.0",
+    [version]$PackageVersion = "1.0.10.0",
     [string]$SdkVersion = "10.0.26100.0"
 )
 

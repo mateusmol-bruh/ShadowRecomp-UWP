@@ -4,7 +4,7 @@ Esta adaptação adiciona um alvo UWP x64 para o Modo de Desenvolvedor do Xbox S
 
 O app pode abrir diretamente um disco de Xbox extraído em `original/`. Quando já existe uma instalação em `game/`, ela tem prioridade. O instalador continua disponível para arquivos ISO e para uma instalação solicitada pelo usuário. O port usa o carregador de mods do ShadowRecomp com o formato de perfil do SA Mod Manager.
 
-A entrega contém o APPX UWP x64 1.0.9.0 `ShadowRecomp.UWP.x64.appx`, o certificado público da assinatura de teste `ShadowRecomp-UWP.cer`, o patch e o framework UWP x64 da Microsoft. O framework foi distribuído sem alterações em `Dependencies/x64/Microsoft.VCLibs.x64.14.00.appx`. [Redistribuíveis do Visual Studio](https://learn.microsoft.com/visualstudio/releases/vs18/redistribution)
+A entrega contém o APPX UWP x64 1.0.10.0 `ShadowRecomp.UWP.x64.appx`, o certificado público da assinatura de teste `ShadowRecomp-UWP.cer`, o patch e o framework UWP x64 da Microsoft. O framework foi distribuído sem alterações em `Dependencies/x64/Microsoft.VCLibs.x64.14.00.appx`. [Redistribuíveis do Visual Studio](https://learn.microsoft.com/visualstudio/releases/vs18/redistribution)
 
 ## Aplicar o patch
 
@@ -39,11 +39,11 @@ O pacote é escrito em `out\uwp\package\ShadowRecomp.UWP.x64.appx`. Sem um PFX, 
 3. Ao adicionar as dependências, selecione `Dependencies/x64/Microsoft.VCLibs.x64.14.00.appx`. As DLLs do SDL3 e do DXC já estão no APPX principal.
 4. Conecte a unidade preparada antes de abrir o Shadow Recompiled. O app tenta abrir a instalação existente ou a mídia extraída em `shadow05/original`. Se a fonte disponível for uma ISO, siga o assistente.
 
-Para atualizar, feche o jogo e instale o APPX 1.0.9.0 sobre a versão anterior. O pacote usa o certificado de teste das versões 1.0.2.0 a 1.0.8.0. Se o portal rejeitar a atualização, anote o código de erro e faça uma cópia dos arquivos de `LocalState` antes de considerar remover a versão anterior.
+Para atualizar, feche o jogo e instale o APPX 1.0.10.0 sobre a versão anterior. O pacote usa o mesmo certificado de teste da versão 1.0.9.0. Se o portal rejeitar a atualização, anote o código de erro e faça uma cópia dos arquivos de `LocalState` antes de considerar remover a versão anterior.
 
 ## Armazenamento interno ou USB
 
-O app fica instalado no console. A seleção do armazenamento vale para a mídia original, os dados instalados, os saves, os mods e o cache. O `LocalState` fica acessível no explorador de arquivos do Xbox Device Portal. Sem um seletor, o app mantém uma instalação existente no `LocalState`, procura uma única pasta USB preparada ou usa o `LocalState` se nenhuma for encontrada.
+O app fica instalado no console. A seleção do armazenamento vale para a mídia original, os dados instalados, os saves, os mods e o cache. O `LocalState` fica acessível no explorador de arquivos do Xbox Device Portal. A partir da versão 1.0.10.0, o app procura `shadow05/storage-id.txt` a cada abertura. Ao encontrar um único marcador válido, usa a unidade USB e grava `usb:<identificador>` em `LocalState/storage.txt`. Se não encontrar nenhum, usa os dados internos e grava `local`, mesmo que tenha usado um USB na abertura anterior.
 
 | Pasta | Conteúdo |
 | --- | --- |
@@ -58,7 +58,6 @@ O app fica instalado no console. A seleção do armazenamento vale para a mídia
 1. No PC, crie a pasta `shadow05` na raiz de uma unidade USB NTFS acessível a apps UWP. Conceda **Modificar** a `ALL APPLICATION PACKAGES` nessa pasta e nos seus arquivos e subpastas. Se o Xbox perguntar como usar a unidade, selecione **Mídia**. [Preparação de USB no Modo de Desenvolvedor](https://github.com/XboxEmulationHub/devmodewiki/blob/master/docs/xbox-setup/xbox-developer-mode-setup.mdx)
 2. Dentro de `shadow05`, crie `storage-id.txt` com um identificador, por exemplo `shadow-usb`. Use até 64 letras ASCII, números, hífens ou sublinhados. Conecte a unidade ao Xbox.
 3. Coloque a mídia em `shadow05/original/` no USB e abra o app. Para um disco extraído, a versão 1.0.3.0 verifica a presença dos arquivos exigidos e o hash de `default.xbe`, depois lê o jogo nessa pasta. Uma ISO ainda passa pelo assistente e ocupa espaço adicional em `shadow05/game/`.
-4. Para fixar uma unidade USB, feche o app e envie um arquivo `storage.txt` para o `LocalState` pelo Device Portal. Use o conteúdo `usb:shadow-usb`, com o mesmo identificador da unidade. Use esse seletor também para migrar do armazenamento interno ou quando houver várias unidades preparadas.
 
 Para o passo 1, este exemplo usa `X:` como letra da unidade **no PC**. Ajuste a letra antes de executar.
 
@@ -66,25 +65,24 @@ Para o passo 1, este exemplo usa `X:` como letra da unidade **no PC**. Ajuste a 
 New-Item -ItemType Directory -Path 'X:\shadow05' -Force
 icacls 'X:\shadow05' /grant '*S-1-15-2-1:(OI)(CI)M' /T
 Set-Content -Encoding ascii -LiteralPath 'X:\shadow05\storage-id.txt' -Value 'shadow-usb'
-Set-Content -Encoding ascii -LiteralPath '.\storage.txt' -Value 'usb:shadow-usb'
 ```
 
 Se você já usa a pasta `ShadowRecomp` na raiz do USB, feche o app e renomeie essa pasta para `shadow05`. Mantenha o `storage-id.txt` dentro dela.
 
 Para migrar uma instalação, copie `original/`, `game/`, `save/` e `mods/` do `LocalState` para `shadow05/` no USB com o jogo fechado. Confirme que o jogo abre e que o progresso aparece no USB antes de liberar espaço no console. A migração é manual. O `config.toml` e o seletor `storage.txt` ficam no console.
 
-O app identifica a unidade pelo conteúdo de `storage-id.txt`, mesmo se a letra mudar no console. Se um USB selecionado explicitamente estiver ausente, indisponível para gravação ou ligado junto de outro com o mesmo identificador, o app registra o erro de inicialização. Para usar os dados internos explicitamente, troque o conteúdo de `LocalState/storage.txt` para `local` e reabra o app. Feche o aplicativo antes de desconectar o USB.
+O app identifica a unidade pelo conteúdo de `storage-id.txt`, mesmo se a letra mudar no console. Se várias unidades estiverem preparadas, o app usa o identificador de `LocalState/storage.txt` quando ele corresponde a uma única unidade. Para resolver uma seleção ambígua, feche o app e deixe conectada apenas a unidade desejada ou informe `usb:<identificador>` no arquivo `storage.txt` antes de reabrir. Para usar o armazenamento interno, feche o app, desconecte as unidades preparadas e reabra. A mídia interna fica em `LocalState/original/`.
 
 Para abrir o instalador no armazenamento selecionado, crie um arquivo vazio `LocalState/install.txt` e reabra o aplicativo. O marcador é removido quando o assistente conclui a instalação.
 
 ## Diagnosticar falhas na abertura
 
-Abra a versão 1.0.9.0 com a unidade conectada. Se usou `disable-gamepads.txt` no teste anterior, retire esse marcador de `LocalState` para testar com o controle. Se a tela ficar preta ou o jogo voltar para a dashboard, baixe `startup.log` no **File Explorer → LocalAppData → Shadow Recompiled → LocalState** do Xbox Device Portal. O app grava o arquivo no console mesmo quando usa o USB. Cada nova abertura reinicia o arquivo. [Explorador de arquivos do Device Portal](https://learn.microsoft.com/en-us/windows/uwp/debug-test-perf/device-portal-api-core#app-file-explorer)
+Abra a versão 1.0.10.0 com a unidade conectada. Se usou `disable-gamepads.txt` no teste anterior, retire esse marcador de `LocalState` para testar com o controle. Se a tela ficar preta ou o jogo voltar para a dashboard, baixe `startup.log` no **File Explorer → LocalAppData → Shadow Recompiled → LocalState** do Xbox Device Portal. O app grava o arquivo no console mesmo quando usa o USB. Cada nova abertura reinicia o arquivo. [Explorador de arquivos do Device Portal](https://learn.microsoft.com/en-us/windows/uwp/debug-test-perf/device-portal-api-core#app-file-explorer)
 
 | Última etapa registrada | O que investigar |
 | --- | --- |
 | O log do teste não aparece | Ativação do pacote, dependências ou acesso ao `LocalState`. |
-| `Storage` | Unidade, identificador, permissões ou seleção do armazenamento. Para isolar a inicialização gráfica, teste uma vez com `local` no seletor e depois restaure `usb:shadow-usb`. O teste interno pode abrir o assistente sem mídia. |
+| `Storage` | Unidade, identificador, permissões ou seleção do armazenamento. Para testar o armazenamento interno, feche o app e reabra com as unidades preparadas desconectadas. Sem mídia interna, o assistente pode abrir. |
 | `Media` | Busca e validação do disco extraído. `Launching in place` confirma que o app escolheu carregar a mídia diretamente. |
 | `Kernel` | Resolução das referências a dados do Xbox original na memória emulada. |
 | `Video` | Janela WinRT, dispositivo Direct3D 12, cadeia de apresentação ou primeiro quadro. |
